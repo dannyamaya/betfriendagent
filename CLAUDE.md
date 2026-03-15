@@ -2,6 +2,14 @@
 
 Card prediction assistant for La Liga + La Liga 2. Sends Telegram analysis ~30 min before each game.
 
+## IMPORTANT: Time Awareness
+
+**Always check the current datetime before answering time-sensitive questions.** Run `date` or use `datetime.now(ZoneInfo("America/Bogota"))` to get the actual current time. Danny is in Bogota (GMT-5). Never assume what day/time it is — always verify. La Liga games are typically:
+- Friday: 1 game ~2PM Bogota
+- Saturday: 3-4 games ~9AM-3PM Bogota
+- Sunday: 3-4 games ~7AM-3PM Bogota
+- Monday: 1 game ~2PM Bogota
+
 ## Architecture
 
 - **Database:** Supabase free PostgreSQL (project `abwvalvodnzryrygpfmu`, region `us-west-2`, pooler port `6543`)
