@@ -144,14 +144,28 @@ def generate_pre_game_image(
             score = f"{h.get('team_a_score', '?')}-{h.get('team_b_score', '?')}"
             text = f"{h.get('team_a_name', '?')} {score} {h.get('team_b_name', '?')}"
             d.text((30, cy), text, fill=GRAY, font=SMALL)
-            # Cards right-aligned
-            cards = f"{tyc} YC  {trc} RC"
-            cw = d.textlength(cards, font=SMALL)
-            d.text((W - 30 - cw, cy), cards, fill=GRAY, font=SMALL)
+            # Cards right-aligned with color squares
+            rx = W - 30
+            rc_text = str(trc)
+            rx -= d.textlength(rc_text, font=SMALL)
+            d.text((rx, cy), rc_text, fill=GRAY, font=SMALL)
+            rx -= 13
+            d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=RED)
+            rx -= 10
+            yc_text = str(tyc)
+            rx -= d.textlength(yc_text, font=SMALL)
+            d.text((rx, cy), yc_text, fill=GRAY, font=SMALL)
+            rx -= 13
+            d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=YELLOW)
             cy += 20
         if len(h2h) > 1:
-            avg_text = f"AVG {total_yc/len(h2h):.1f} YC  {total_rc/len(h2h):.1f} RC"
-            d.text((30, cy), avg_text, fill=WHITE, font=BODY_B)
+            d.text((30, cy), "AVG", fill=WHITE, font=BODY_B)
+            ax = 70
+            d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=YELLOW)
+            d.text((ax + 14, cy), f"{total_yc/len(h2h):.1f}", fill=WHITE, font=BODY_B)
+            ax += 50
+            d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=RED)
+            d.text((ax + 14, cy), f"{total_rc/len(h2h):.1f}", fill=WHITE, font=BODY_B)
             cy += 22
 
     # ── Lineup ──
@@ -190,7 +204,7 @@ def generate_pre_game_image(
 
                 text = f"{pname} ({pos})"
                 d.text((40, cy), text, fill=color, font=SMALL)
-                stats_text = f"{yc}Y {rc}R  {ypg:.2f}/J{risk}"
+                stats_text = f"{yc}  {rc}  {ypg:.2f}/J{risk}"
                 sw = d.textlength(stats_text, font=SMALL)
                 d.text((W - 30 - sw, cy), stats_text, fill=color, font=SMALL)
                 cy += 18
@@ -232,7 +246,15 @@ def generate_pre_game_image(
         ref_rc = referee.get("total_rc", 0)
         ref_games = referee.get("games", 0)
         ref_ypg = referee.get("yc_per_game", 0)
-        d.text((30, cy), f"Temporada: {ref_yc} YC / {ref_rc} RC en {ref_games}J — {ref_ypg:.1f}/J", fill=GRAY, font=BODY)
+        d.text((30, cy), "Temporada:", fill=GRAY, font=BODY)
+        sx = 120
+        d.rectangle([sx, cy + 2, sx + 10, cy + 14], fill=YELLOW)
+        d.text((sx + 14, cy), f"{ref_yc}", fill=GRAY, font=BODY)
+        sx += 14 + d.textlength(str(ref_yc), font=BODY) + 8
+        d.rectangle([sx, cy + 2, sx + 10, cy + 14], fill=RED)
+        d.text((sx + 14, cy), f"{ref_rc}", fill=GRAY, font=BODY)
+        sx += 14 + d.textlength(str(ref_rc), font=BODY) + 8
+        d.text((sx, cy), f"en {ref_games}J — {ref_ypg:.1f}/J", fill=GRAY, font=BODY)
         cy += 20
 
         if referee_last:
@@ -244,13 +266,28 @@ def generate_pre_game_image(
             for g in referee_last:
                 text = f"{g.get('home_team', '?')} vs {g.get('away_team', '?')}"
                 d.text((40, cy), text, fill=GRAY, font=SMALL)
-                cards = f"{g.get('total_yc', 0)}Y {g.get('total_rc', 0)}R"
-                cw = d.textlength(cards, font=SMALL)
-                d.text((W - 30 - cw, cy), cards, fill=GRAY, font=SMALL)
+                rx = W - 30
+                rc_val = str(g.get('total_rc', 0))
+                rx -= d.textlength(rc_val, font=SMALL)
+                d.text((rx, cy), rc_val, fill=GRAY, font=SMALL)
+                rx -= 13
+                d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=RED)
+                rx -= 10
+                yc_val = str(g.get('total_yc', 0))
+                rx -= d.textlength(yc_val, font=SMALL)
+                d.text((rx, cy), yc_val, fill=GRAY, font=SMALL)
+                rx -= 13
+                d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=YELLOW)
                 cy += 18
             avg_last = sum(ref_ycs) / len(ref_ycs)
             avg_rc_last = sum(ref_rcs) / len(ref_rcs)
-            d.text((30, cy), f"AVG ult.{len(referee_last)}: {avg_last:.1f} YC  {avg_rc_last:.1f} RC", fill=WHITE, font=BODY_B)
+            d.text((30, cy), f"AVG ult.{len(referee_last)}:", fill=WHITE, font=BODY_B)
+            ax = 30 + d.textlength(f"AVG ult.{len(referee_last)}: ", font=BODY_B)
+            d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=YELLOW)
+            d.text((ax + 14, cy), f"{avg_last:.1f}", fill=WHITE, font=BODY_B)
+            ax += 14 + d.textlength(f"{avg_last:.1f}", font=BODY_B) + 8
+            d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=RED)
+            d.text((ax + 14, cy), f"{avg_rc_last:.1f}", fill=WHITE, font=BODY_B)
             con_color = GREEN if ref_delta <= 1.5 else RED
             delta_text = f"delta {ref_delta:.1f}"
             dw = d.textlength(delta_text, font=BODY_B)
@@ -301,12 +338,13 @@ def generate_pre_game_image(
         bar_w = int(min(pred_total, 10) * 40)
         bar_color = GREEN if pred_total < 4 else ORANGE if pred_total < 6 else RED
         d.rectangle([bar_x, cy, bar_x + bar_w, cy + 18], fill=bar_color)
-        d.text((bar_x + bar_w + 8, cy + 2), f"{pred_total} YC total", fill=WHITE, font=BODY_B)
+        d.rectangle([bar_x + bar_w + 8, cy + 3, bar_x + bar_w + 18, cy + 15], fill=YELLOW)
+        d.text((bar_x + bar_w + 22, cy + 2), f"{pred_total} total", fill=WHITE, font=BODY_B)
         cy += 25
 
         # Per-team breakdown
-        d.text((30, cy), f"{home}: >{pred_home} YC", fill=YELLOW, font=BODY)
-        away_text = f"{away}: >{pred_away} YC"
+        d.text((30, cy), f"{home}: >{pred_home}", fill=YELLOW, font=BODY)
+        away_text = f"{away}: >{pred_away}"
         aw = d.textlength(away_text, font=BODY)
         d.text((W - 30 - aw, cy), away_text, fill=YELLOW, font=BODY)
         cy += 22
@@ -389,7 +427,14 @@ def _draw_team_block(
         y += 25
 
         # AVG and delta
-        d.text((30, y), f"AVG {avg_yc:.1f} YC  {avg_rc:.1f} RC", fill=GRAY, font=SMALL)
+        # AVG with colored squares
+        d.text((30, y), "AVG", fill=GRAY, font=SMALL)
+        ax = 55
+        d.rectangle([ax, y + 2, ax + 8, y + 12], fill=YELLOW)
+        d.text((ax + 11, y), f"{avg_yc:.1f}", fill=GRAY, font=SMALL)
+        ax += 11 + d.textlength(f"{avg_yc:.1f}", font=SMALL) + 6
+        d.rectangle([ax, y + 2, ax + 8, y + 12], fill=RED)
+        d.text((ax + 11, y), f"{avg_rc:.1f}", fill=GRAY, font=SMALL)
         if delta <= 1.0:
             d_color, d_label = GREEN, "consistente"
         elif delta <= 2.0:

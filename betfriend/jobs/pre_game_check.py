@@ -320,13 +320,6 @@ async def run() -> None:
             )
             await telegram.send_photo(img_buf)
 
-            # Send news article links as separate text message
-            if news_urls:
-                links_msg = "📰 <b>Fuentes:</b>\n" + "\n".join(
-                    f"• {url}" for url in news_urls
-                )
-                await telegram.send(links_msg)
-
             msg = format_pre_game(
                 fixture,
                 home_stats=home_stats,

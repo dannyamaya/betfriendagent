@@ -176,7 +176,12 @@ async def run() -> None:
         home_top_players = await store.get_top_card_players(home_id, 5)
         away_top_players = await store.get_top_card_players(away_id, 5)
 
-        # H2H
+        # H2H — delete stale records to force re-fetch with card data
+        async with store.pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM head2head
+                WHERE (team_a_id=$1 AND team_b_id=$2) OR (team_a_id=$2 AND team_b_id=$1)
+            """, home_id, away_id)
         h2h_records = await store.get_h2h(home_id, away_id, 5)
         if not h2h_records:
             async with store.pool.acquire() as conn:
@@ -339,12 +344,6 @@ async def run() -> None:
         )
 
         await telegram.send_photo(img_buf)
-        # Send news article links as separate text message
-        if news_urls:
-            links_msg = "📰 <b>Fuentes:</b>\n" + "\n".join(
-                f"• {url}" for url in news_urls
-            )
-            await telegram.send(links_msg)
         logger.info("Test pre-game image sent!")
 
     finally:

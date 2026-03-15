@@ -62,8 +62,8 @@ async def get_match_news_context(
 
         # Combine and truncate
         combined = " | ".join(snippets)
-        if len(combined) > 500:
-            combined = combined[:497] + "..."
+        if len(combined) > 1000:
+            combined = combined[:997] + "..."
         return combined, used_urls
 
     except Exception as e:
