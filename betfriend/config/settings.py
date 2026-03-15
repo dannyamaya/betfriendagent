@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     season: int = 2025
 
     # Timezone
-    timezone: str = "Europe/Madrid"
+    timezone: str = "America/Bogota"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
