@@ -127,16 +127,21 @@ def _parse_pdf(content: bytes) -> dict[str, str]:
     try:
         with pdfplumber.open(BytesIO(content)) as pdf:
             for page in pdf.pages:
+                # Log raw text for debugging
+                text = page.extract_text()
+                if text:
+                    logger.info(f"    PDF text (first 500 chars): {text[:500]}")
+
                 # Try table extraction first
                 tables = page.extract_tables()
-                for table in tables:
+                logger.info(f"    PDF tables found: {len(tables)}")
+                for i, table in enumerate(tables):
+                    logger.info(f"    Table {i} rows: {len(table)}, first row: {table[0] if table else 'empty'}")
                     designations.update(_parse_table(table))
 
                 # Fallback: text extraction
-                if not designations:
-                    text = page.extract_text()
-                    if text:
-                        designations.update(_parse_text(text))
+                if not designations and text:
+                    designations.update(_parse_text(text))
     except Exception as e:
         logger.error(f"  Failed to parse RFEF PDF: {e}")
 
@@ -208,7 +213,7 @@ def _normalize_match_key(match_str: str) -> str:
         words = name.split()
         skip = {"real", "club", "deportivo", "cf", "rc", "sd", "ud", "cd",
                 "atletico", "sporting", "racing", "fc", "de", "la", "del",
-                "balompie", "futbol", "sociedad"}
+                "balompie", "futbol"}
         for w in words:
             if w not in skip and len(w) > 2:
                 return w
