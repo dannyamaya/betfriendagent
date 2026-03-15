@@ -10,7 +10,7 @@ from betfriend.api.budget import BudgetTracker
 from betfriend.api.client import APIFootballClient, parse_fixture
 from betfriend.config.settings import settings
 from betfriend.db.store import Store
-from betfriend.notifications.formatter import format_pre_game
+from betfriend.notifications.image import generate_pre_game_image
 from betfriend.notifications.telegram import TelegramNotifier
 
 
@@ -196,31 +196,47 @@ async def run() -> None:
             referee_total_refs = await store.get_total_referees_with_games()
             referee_last_games = await store.get_referee_last_games(fixture["referee_id"], 3)
 
-        msg = format_pre_game(
-            fixture,
-            home_stats=home_stats,
-            away_stats=away_stats,
+        # Convert DB records to dicts for image generator
+        def _to_dict(rec):
+            return dict(rec) if rec else None
+        def _to_dicts(recs):
+            return [dict(r) for r in recs] if recs else None
+
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(settings.timezone)
+        kickoff_dt: datetime = fixture["kickoff"].astimezone(tz)
+
+        img_buf = generate_pre_game_image(
+            home=fixture["home_team_name"],
+            away=fixture["away_team_name"],
+            competition=fixture["competition_name"],
+            kickoff_str=kickoff_dt.strftime("%d/%m/%Y %H:%M"),
+            home_pos=home_stats["standing_pos"] if home_stats else None,
+            away_pos=away_stats["standing_pos"] if away_stats else None,
+            home_stats=_to_dict(home_stats),
+            away_stats=_to_dict(away_stats),
             home_yc_rank=home_yc_rank,
             away_yc_rank=away_yc_rank,
             home_rc_rank=home_rc_rank,
             away_rc_rank=away_rc_rank,
-            home_form=home_form,
-            away_form=away_form,
-            home_top_players=home_top_players,
-            away_top_players=away_top_players,
-            referee_stats=referee_stats,
-            referee_yc_rank=referee_yc_rank,
-            referee_total_refs=referee_total_refs,
-            referee_last_games=referee_last_games,
-            home_lineup=home_lineup,
-            away_lineup=away_lineup,
-            h2h_records=h2h_records,
+            home_form=_to_dicts(home_form),
+            away_form=_to_dicts(away_form),
+            home_top_players=_to_dicts(home_top_players),
+            away_top_players=_to_dicts(away_top_players),
             home_player_ranks=home_player_ranks,
             away_player_ranks=away_player_ranks,
+            h2h=_to_dicts(h2h_records),
+            home_lineup=_to_dicts(home_lineup) if home_lineup else None,
+            away_lineup=_to_dicts(away_lineup) if away_lineup else None,
+            referee=_to_dict(referee_stats),
+            referee_rank=referee_yc_rank,
+            referee_total=referee_total_refs,
+            referee_last=_to_dicts(referee_last_games),
         )
 
-        await telegram.send(msg)
-        logger.info("Test pre-game message sent!")
+        await telegram.send_photo(img_buf)
+        logger.info("Test pre-game image sent!")
 
     finally:
         await api.close()
