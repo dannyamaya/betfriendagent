@@ -137,6 +137,24 @@ async def run() -> None:
             home_top_players = await store.get_top_card_players(home_id, 5)
             away_top_players = await store.get_top_card_players(away_id, 5)
 
+            # Player league rankings
+            home_player_ranks: dict[str, int] = {}
+            away_player_ranks: dict[str, int] = {}
+            for players, ranks in [(home_top_players, home_player_ranks), (away_top_players, away_player_ranks)]:
+                if not players:
+                    continue
+                for p in players[:5]:
+                    # Get player_id from name
+                    async with store.pool.acquire() as conn:
+                        row = await conn.fetchrow(
+                            "SELECT pcs.player_id FROM player_card_stats pcs JOIN players pl ON pl.id=pcs.player_id WHERE pl.name=$1 LIMIT 1",
+                            p["name"]
+                        )
+                    if row:
+                        rank = await store.get_player_league_yc_rank(row["player_id"])
+                        if rank:
+                            ranks[p["name"]] = rank
+
             # H2H data — fetch from API if not in DB, then read from DB
             h2h_records = await store.get_h2h(home_id, away_id, 5)
             if not h2h_records:
@@ -209,6 +227,8 @@ async def run() -> None:
                 home_lineup=home_lineup,
                 away_lineup=away_lineup,
                 h2h_records=h2h_records,
+                home_player_ranks=home_player_ranks,
+                away_player_ranks=away_player_ranks,
             )
             await telegram.send(msg)
 

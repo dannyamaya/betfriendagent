@@ -78,25 +78,30 @@ async def run() -> None:
 
         await store.recompute_referee_stats()
 
-        # Find Barcelona fixture
+        # Find Barcelona fixture, or first La Liga, or first available
         db_fixtures = await store.get_fixtures_by_date(tomorrow)
+        if not db_fixtures:
+            # Try today
+            db_fixtures = await store.get_fixtures_by_date(date.today())
+        if not db_fixtures:
+            logger.error("No fixtures found")
+            return
+
         barca_fixture = None
+        # Priority 1: Barcelona
         for f in db_fixtures:
             if "barce" in f["home_team_name"].lower() or "barce" in f["away_team_name"].lower():
                 barca_fixture = f
                 break
-
+        # Priority 2: Any La Liga game
         if not barca_fixture:
-            logger.warning("No Barcelona fixture found for tomorrow")
-            # Just pick the first La Liga fixture
             for f in db_fixtures:
                 if f["competition_name"] == "La Liga":
                     barca_fixture = f
                     break
-
+        # Priority 3: First fixture
         if not barca_fixture:
-            logger.error("No fixtures found for tomorrow")
-            return
+            barca_fixture = db_fixtures[0]
 
         fixture = barca_fixture
         home_id = fixture["home_team_id"]
@@ -115,7 +120,7 @@ async def run() -> None:
         home_lineup = await store.get_fixture_lineup(fixture_db_id, home_id) if has_lineup else []
         away_lineup = await store.get_fixture_lineup(fixture_db_id, away_id) if has_lineup else []
 
-        # Fetch all analysis data
+        # Fetch all analysis data (0 API calls — all from DB)
         home_stats = await store.get_team_stats(home_id)
         away_stats = await store.get_team_stats(away_id)
         home_yc_rank = await store.get_team_yc_rank(home_id)
@@ -163,6 +168,23 @@ async def run() -> None:
                         )
                 h2h_records = await store.get_h2h(home_id, away_id, 5)
 
+        # Player league rankings
+        home_player_ranks: dict[str, int] = {}
+        away_player_ranks: dict[str, int] = {}
+        for players, ranks in [(home_top_players, home_player_ranks), (away_top_players, away_player_ranks)]:
+            if not players:
+                continue
+            for p in players[:5]:
+                async with store.pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT pcs.player_id FROM player_card_stats pcs JOIN players pl ON pl.id=pcs.player_id WHERE pl.name=$1 LIMIT 1",
+                        p["name"]
+                    )
+                if row:
+                    rank = await store.get_player_league_yc_rank(row["player_id"])
+                    if rank:
+                        ranks[p["name"]] = rank
+
         # Referee
         referee_stats = None
         referee_yc_rank = None
@@ -193,6 +215,8 @@ async def run() -> None:
             home_lineup=home_lineup,
             away_lineup=away_lineup,
             h2h_records=h2h_records,
+            home_player_ranks=home_player_ranks,
+            away_player_ranks=away_player_ranks,
         )
 
         await telegram.send(msg)
