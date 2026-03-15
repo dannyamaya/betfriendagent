@@ -6,7 +6,8 @@ team season stats, and team form. Keeps the DB current after each matchday.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -26,7 +27,7 @@ async def run() -> None:
     telegram = TelegramNotifier()
 
     try:
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = datetime.now(ZoneInfo("America/Bogota")).date() - timedelta(days=1)
         logger.info(f"Post-game update for {yesterday}")
 
         fixtures_updated = 0

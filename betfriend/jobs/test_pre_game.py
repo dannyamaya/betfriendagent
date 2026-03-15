@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -12,6 +13,8 @@ from betfriend.config.settings import settings
 from betfriend.db.store import Store
 from betfriend.notifications.image import generate_pre_game_image
 from betfriend.notifications.telegram import TelegramNotifier
+from betfriend.scrapers.coaches import get_coach_aggressiveness
+from betfriend.scrapers.news import get_match_news_context
 
 
 async def run() -> None:
@@ -24,7 +27,7 @@ async def run() -> None:
 
     try:
         # Find tomorrow's fixtures
-        tomorrow = date.today() + __import__("datetime").timedelta(days=1)
+        tomorrow = datetime.now(ZoneInfo("America/Bogota")).date() + timedelta(days=1)
         logger.info(f"Looking for fixtures on {tomorrow}")
 
         # First make sure we have tomorrow's fixtures
@@ -82,7 +85,7 @@ async def run() -> None:
         db_fixtures = await store.get_fixtures_by_date(tomorrow)
         if not db_fixtures:
             # Try today
-            db_fixtures = await store.get_fixtures_by_date(date.today())
+            db_fixtures = await store.get_fixtures_by_date(datetime.now(ZoneInfo("America/Bogota")).date())
         if not db_fixtures:
             logger.error("No fixtures found")
             return
@@ -202,10 +205,25 @@ async def run() -> None:
         def _to_dicts(recs):
             return [dict(r) for r in recs] if recs else None
 
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
         tz = ZoneInfo(settings.timezone)
-        kickoff_dt: datetime = fixture["kickoff"].astimezone(tz)
+        kickoff_dt = fixture["kickoff"].astimezone(tz)
+
+        # Coach aggressiveness
+        home_coach_name = home_stats.get("coach") if home_stats else None
+        away_coach_name = away_stats.get("coach") if away_stats else None
+        home_coach_data = None
+        away_coach_data = None
+        if home_coach_name:
+            score, desc = get_coach_aggressiveness(home_coach_name)
+            home_coach_data = (home_coach_name, score, desc)
+        if away_coach_name:
+            score, desc = get_coach_aggressiveness(away_coach_name)
+            away_coach_data = (away_coach_name, score, desc)
+
+        # News context
+        news_context = await get_match_news_context(
+            fixture["home_team_name"], fixture["away_team_name"]
+        )
 
         img_buf = generate_pre_game_image(
             home=fixture["home_team_name"],
@@ -233,6 +251,9 @@ async def run() -> None:
             referee_rank=referee_yc_rank,
             referee_total=referee_total_refs,
             referee_last=_to_dicts(referee_last_games),
+            home_coach=home_coach_data,
+            away_coach=away_coach_data,
+            news_context=news_context or None,
         )
 
         await telegram.send_photo(img_buf)

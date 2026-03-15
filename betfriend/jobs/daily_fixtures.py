@@ -7,7 +7,8 @@ API data and RFEF PDFs, and sends a Telegram summary.
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -41,7 +42,7 @@ async def run() -> None:
     telegram = TelegramNotifier()
 
     try:
-        today = date.today()
+        today = datetime.now(ZoneInfo("America/Bogota")).date()
         logger.info(f"Fetching fixtures for {today}")
 
         matchdays_to_scrape: set[tuple[int, int]] = set()  # (league_id, matchday)

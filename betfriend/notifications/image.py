@@ -71,6 +71,9 @@ def generate_pre_game_image(
     referee_rank: int | None = None,
     referee_total: int | None = None,
     referee_last: list[dict] | None = None,
+    home_coach: tuple[str, int, str] | None = None,
+    away_coach: tuple[str, int, str] | None = None,
+    news_context: str | None = None,
 ) -> BytesIO:
     """Generate a pre-game card image and return as BytesIO PNG."""
     W = 700
@@ -90,10 +93,14 @@ def generate_pre_game_image(
             if lineup:
                 starters = [p for p in lineup if p.get("is_starter")]
                 y += 30 + len(starters) * 20 + 10
+    if home_coach or away_coach:
+        y += 30 + 25 * (bool(home_coach) + bool(away_coach))
     if referee:
         y += 80
         if referee_last:
             y += len(referee_last) * 20 + 25
+    if news_context:
+        y += 70
     y += 40  # footer padding
 
     img = Image.new("RGB", (W, y), BG)
@@ -106,7 +113,7 @@ def generate_pre_game_image(
     away_pos_str = f" ({_ord(away_pos)})" if away_pos else ""
     title = f"{home}{home_pos_str}  vs  {away}{away_pos_str}"
     d.text((20, 15), title, fill=WHITE, font=TITLE)
-    d.text((20, 48), f"⚽  {competition}  —  {kickoff_str}", fill=GRAY, font=BODY)
+    d.text((20, 48), f"BetFriend  |  {competition}  —  {kickoff_str}", fill=GRAY, font=BODY)
     d.text((20, 68), "BetFriend", fill=ACCENT, font=SMALL)
     cy = 95
 
@@ -122,7 +129,7 @@ def generate_pre_game_image(
     if h2h:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
         cy += 8
-        d.text((20, cy), "🔄  Ultimos enfrentamientos", fill=WHITE, font=HEADER)
+        d.text((20, cy), "H2H  Ultimos enfrentamientos", fill=WHITE, font=HEADER)
         cy += 25
         total_yc = 0
         total_rc = 0
@@ -148,7 +155,7 @@ def generate_pre_game_image(
     if home_lineup or away_lineup:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
         cy += 8
-        d.text((20, cy), "📋  Alineacion", fill=WHITE, font=HEADER)
+        d.text((20, cy), "ALINEACION", fill=WHITE, font=HEADER)
         cy += 25
         for name, lineup, ranks in [
             (home, home_lineup, home_player_ranks),
@@ -176,7 +183,7 @@ def generate_pre_game_image(
                         risk = " ALTA"
                     elif ypg >= 0.3:
                         color = ORANGE
-                        risk = " ⚡"
+                        risk = " !!"
 
                 text = f"{pname} ({pos})"
                 d.text((40, cy), text, fill=color, font=SMALL)
@@ -186,13 +193,37 @@ def generate_pre_game_image(
                 cy += 18
             cy += 8
 
+    # ── Coaches ──
+    if home_coach or away_coach:
+        d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
+        cy += 8
+        d.text((20, cy), "ENTRENADORES", fill=WHITE, font=HEADER)
+        cy += 22
+        for team_name, coach_info in [(home, home_coach), (away, away_coach)]:
+            if not coach_info:
+                continue
+            c_name, c_score, c_desc = coach_info
+            # Color based on score
+            if c_score >= 7:
+                c_color = RED
+            elif c_score >= 5:
+                c_color = ORANGE
+            else:
+                c_color = GREEN
+            bar_w = int(c_score * 12)
+            d.rectangle([30, cy + 3, 30 + bar_w, cy + 13], fill=c_color)
+            d.text((30 + bar_w + 6, cy), f"{c_score}/10", fill=c_color, font=SMALL)
+            coach_text = f"{team_name}: {c_name} — {c_desc}"
+            d.text((130, cy), coach_text, fill=GRAY, font=SMALL)
+            cy += 20
+
     # ── Referee ──
     if referee:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
         cy += 8
         ref_name = referee.get("name", "?")
         rank_str = f"  ({_ord(referee_rank)} de {referee_total})" if referee_rank and referee_total else ""
-        d.text((20, cy), f"👨‍⚖️  {ref_name}{rank_str}", fill=WHITE, font=HEADER)
+        d.text((20, cy), f"ARBITRO  {ref_name}{rank_str}", fill=WHITE, font=HEADER)
         cy += 22
         ref_yc = referee.get("total_yc", 0)
         ref_rc = referee.get("total_rc", 0)
@@ -217,8 +248,29 @@ def generate_pre_game_image(
     elif not referee:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
         cy += 8
-        d.text((20, cy), "👨‍⚖️  Arbitro: sin datos", fill=GRAY, font=BODY)
+        d.text((20, cy), "ARBITRO: sin datos", fill=GRAY, font=BODY)
         cy += 22
+
+    # ── News context ──
+    if news_context:
+        d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
+        cy += 8
+        d.text((20, cy), "CONTEXTO", fill=WHITE, font=HEADER)
+        cy += 22
+        # Word-wrap the news text
+        words = news_context.split()
+        line = ""
+        for word in words:
+            test = f"{line} {word}".strip()
+            if d.textlength(test, font=SMALL) > W - 60:
+                d.text((30, cy), line, fill=GRAY, font=SMALL)
+                cy += 16
+                line = word
+            else:
+                line = test
+        if line:
+            d.text((30, cy), line, fill=GRAY, font=SMALL)
+            cy += 16
 
     # Crop to actual height
     img = img.crop((0, 0, W, cy + 15))
