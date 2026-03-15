@@ -119,6 +119,52 @@ class APIFootballClient:
     # Fixture events (cards, goals, subs)
     # ------------------------------------------------------------------
 
+    async def get_all_fixtures(
+        self, league_id: int
+    ) -> list[dict[str, Any]]:
+        """Get ALL fixtures for the season (one request)."""
+        data = await self._request(
+            "/fixtures",
+            {"league": league_id, "season": settings.season},
+        )
+        if not data:
+            return []
+        return data.get("response", [])
+
+    async def get_fixture_statistics(
+        self, fixture_api_id: int
+    ) -> list[dict[str, Any]]:
+        data = await self._request(
+            "/fixtures/statistics",
+            {"fixture": fixture_api_id},
+        )
+        if not data:
+            return []
+        return data.get("response", [])
+
+    async def get_fixture_players(
+        self, fixture_api_id: int
+    ) -> list[dict[str, Any]]:
+        """Get player stats for a fixture (includes cards, minutes)."""
+        data = await self._request(
+            "/fixtures/players",
+            {"fixture": fixture_api_id},
+        )
+        if not data:
+            return []
+        return data.get("response", [])
+
+    async def get_team_statistics(
+        self, team_api_id: int, league_id: int
+    ) -> dict[str, Any] | None:
+        data = await self._request(
+            "/teams/statistics",
+            {"team": team_api_id, "league": league_id, "season": settings.season},
+        )
+        if not data or not data.get("response"):
+            return None
+        return data["response"]
+
     async def get_fixture_events(self, fixture_api_id: int) -> list[dict[str, Any]]:
         data = await self._request(
             "/fixtures/events",

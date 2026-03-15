@@ -85,6 +85,61 @@ class Store:
                     api_fetched_at  TIMESTAMPTZ
                 );
 
+                CREATE TABLE IF NOT EXISTS players (
+                    id          SERIAL PRIMARY KEY,
+                    api_id      INT UNIQUE NOT NULL,
+                    name        TEXT NOT NULL,
+                    photo_url   TEXT,
+                    team_id     INT REFERENCES teams(id),
+                    position    TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS player_card_stats (
+                    id              SERIAL PRIMARY KEY,
+                    player_id       INT REFERENCES players(id) UNIQUE,
+                    total_yc        INT DEFAULT 0,
+                    total_rc        INT DEFAULT 0,
+                    games_played    INT DEFAULT 0,
+                    yc_per_game     REAL DEFAULT 0,
+                    rc_per_game     REAL DEFAULT 0,
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS player_fixture_cards (
+                    id              SERIAL PRIMARY KEY,
+                    player_id       INT REFERENCES players(id),
+                    fixture_id      INT REFERENCES fixtures(id),
+                    yellow_cards    INT DEFAULT 0,
+                    red_cards       INT DEFAULT 0,
+                    minutes_played  INT DEFAULT 0,
+                    UNIQUE(player_id, fixture_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS team_season_stats (
+                    id              SERIAL PRIMARY KEY,
+                    team_id         INT REFERENCES teams(id) UNIQUE,
+                    games_played    INT DEFAULT 0,
+                    total_yc        INT DEFAULT 0,
+                    total_rc        INT DEFAULT 0,
+                    yc_per_game     REAL DEFAULT 0,
+                    rc_per_game     REAL DEFAULT 0,
+                    standing_pos    INT,
+                    standing_pts    INT,
+                    form            TEXT,
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS team_form (
+                    id              SERIAL PRIMARY KEY,
+                    team_id         INT REFERENCES teams(id),
+                    fixture_id      INT REFERENCES fixtures(id),
+                    yc              INT DEFAULT 0,
+                    rc              INT DEFAULT 0,
+                    is_home         BOOLEAN,
+                    match_date      DATE,
+                    UNIQUE(team_id, fixture_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS api_request_log (
                     id              SERIAL PRIMARY KEY,
                     endpoint        TEXT NOT NULL,
@@ -193,7 +248,7 @@ class Store:
                 JOIN teams ht ON f.home_team_id = ht.id
                 JOIN teams at ON f.away_team_id = at.id
                 JOIN competitions c ON f.competition_id = c.id
-                WHERE DATE(f.kickoff AT TIME ZONE 'Europe/Madrid') = $1
+                WHERE DATE(f.kickoff AT TIME ZONE 'America/Bogota') = $1
                 ORDER BY f.kickoff
             """, target_date)
 
@@ -223,6 +278,139 @@ class Store:
                 "UPDATE fixtures SET processed = TRUE WHERE id = $1",
                 fixture_id,
             )
+
+    # ------------------------------------------------------------------
+    # Players
+    # ------------------------------------------------------------------
+
+    async def upsert_player(
+        self, api_id: int, name: str, photo_url: str | None,
+        team_id: int, position: str | None
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO players (api_id, name, photo_url, team_id, position)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (api_id) DO UPDATE
+                    SET name = EXCLUDED.name,
+                        photo_url = EXCLUDED.photo_url,
+                        team_id = EXCLUDED.team_id,
+                        position = EXCLUDED.position
+                RETURNING id
+            """, api_id, name, photo_url, team_id, position)
+            return row["id"]  # type: ignore[index]
+
+    async def get_player_id(self, api_id: int) -> int | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id FROM players WHERE api_id = $1", api_id
+            )
+            return row["id"] if row else None
+
+    # ------------------------------------------------------------------
+    # Player Card Stats
+    # ------------------------------------------------------------------
+
+    async def upsert_player_card_stats(
+        self, player_id: int, total_yc: int, total_rc: int, games_played: int
+    ) -> None:
+        yc_pg = total_yc / games_played if games_played > 0 else 0
+        rc_pg = total_rc / games_played if games_played > 0 else 0
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO player_card_stats (player_id, total_yc, total_rc, games_played, yc_per_game, rc_per_game, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                ON CONFLICT (player_id) DO UPDATE
+                    SET total_yc = EXCLUDED.total_yc,
+                        total_rc = EXCLUDED.total_rc,
+                        games_played = EXCLUDED.games_played,
+                        yc_per_game = EXCLUDED.yc_per_game,
+                        rc_per_game = EXCLUDED.rc_per_game,
+                        updated_at = NOW()
+            """, player_id, total_yc, total_rc, games_played, yc_pg, rc_pg)
+
+    # ------------------------------------------------------------------
+    # Player Fixture Cards
+    # ------------------------------------------------------------------
+
+    async def upsert_player_fixture_card(
+        self, player_id: int, fixture_id: int,
+        yellow_cards: int, red_cards: int, minutes_played: int
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO player_fixture_cards (player_id, fixture_id, yellow_cards, red_cards, minutes_played)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (player_id, fixture_id) DO UPDATE
+                    SET yellow_cards = EXCLUDED.yellow_cards,
+                        red_cards = EXCLUDED.red_cards,
+                        minutes_played = EXCLUDED.minutes_played
+            """, player_id, fixture_id, yellow_cards, red_cards, minutes_played)
+
+    # ------------------------------------------------------------------
+    # Team Season Stats
+    # ------------------------------------------------------------------
+
+    async def upsert_team_season_stats(
+        self, team_id: int, games_played: int,
+        total_yc: int, total_rc: int,
+        standing_pos: int | None = None, standing_pts: int | None = None,
+        form: str | None = None
+    ) -> None:
+        yc_pg = total_yc / games_played if games_played > 0 else 0
+        rc_pg = total_rc / games_played if games_played > 0 else 0
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO team_season_stats (team_id, games_played, total_yc, total_rc, yc_per_game, rc_per_game, standing_pos, standing_pts, form, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                ON CONFLICT (team_id) DO UPDATE
+                    SET games_played = EXCLUDED.games_played,
+                        total_yc = EXCLUDED.total_yc,
+                        total_rc = EXCLUDED.total_rc,
+                        yc_per_game = EXCLUDED.yc_per_game,
+                        rc_per_game = EXCLUDED.rc_per_game,
+                        standing_pos = EXCLUDED.standing_pos,
+                        standing_pts = EXCLUDED.standing_pts,
+                        form = EXCLUDED.form,
+                        updated_at = NOW()
+            """, team_id, games_played, total_yc, total_rc, yc_pg, rc_pg,
+                standing_pos, standing_pts, form)
+
+    # ------------------------------------------------------------------
+    # Team Form (per-fixture card history)
+    # ------------------------------------------------------------------
+
+    async def upsert_team_form(
+        self, team_id: int, fixture_id: int,
+        yc: int, rc: int, is_home: bool, match_date: date
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO team_form (team_id, fixture_id, yc, rc, is_home, match_date)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (team_id, fixture_id) DO UPDATE
+                    SET yc = EXCLUDED.yc,
+                        rc = EXCLUDED.rc,
+                        is_home = EXCLUDED.is_home,
+                        match_date = EXCLUDED.match_date
+            """, team_id, fixture_id, yc, rc, is_home, match_date)
+
+    async def get_team_last_n_form(self, team_id: int, n: int = 5) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT yc, rc, is_home, match_date
+                FROM team_form
+                WHERE team_id = $1
+                ORDER BY match_date DESC
+                LIMIT $2
+            """, team_id, n)
+
+    async def get_fixture_id_by_api_id(self, api_id: int) -> int | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id FROM fixtures WHERE api_id = $1", api_id
+            )
+            return row["id"] if row else None
 
     # ------------------------------------------------------------------
     # API Request Log
