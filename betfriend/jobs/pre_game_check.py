@@ -225,7 +225,7 @@ async def run() -> None:
                 referee_stats = await store.get_referee_stats(fixture["referee_id"])
                 referee_yc_rank = await store.get_referee_yc_rank(fixture["referee_id"])
                 referee_total_refs = await store.get_total_referees_with_games()
-                referee_last_games = await store.get_referee_last_games(fixture["referee_id"], 3)
+                referee_last_games = await store.get_referee_last_games(fixture["referee_id"], 5)
 
             # Coach aggressiveness — look up by team name
             home_coach_data = None
@@ -240,7 +240,7 @@ async def run() -> None:
                 away_coach_data = (away_coach_name, score, desc)
 
             # News context
-            news_context = await get_match_news_context(
+            news_context, news_urls = await get_match_news_context(
                 fixture["home_team_name"], fixture["away_team_name"]
             )
 
@@ -319,6 +319,13 @@ async def run() -> None:
                 },
             )
             await telegram.send_photo(img_buf)
+
+            # Send news article links as separate text message
+            if news_urls:
+                links_msg = "📰 <b>Fuentes:</b>\n" + "\n".join(
+                    f"• {url}" for url in news_urls
+                )
+                await telegram.send(links_msg)
 
             msg = format_pre_game(
                 fixture,

@@ -34,37 +34,41 @@ _MAX_TEXT_PER_PAGE = 3000  # chars to extract per page
 _TIMEOUT = 10.0
 
 
-async def get_match_news_context(home_team: str, away_team: str) -> str:
+async def get_match_news_context(
+    home_team: str, away_team: str
+) -> tuple[str, list[str]]:
     """Search for card-relevant news about an upcoming match.
 
-    Returns a brief summary string with card-focused context.
-    Returns empty string if search fails or nothing relevant found.
+    Returns (summary_text, list_of_urls).
+    Returns ("", []) if search fails or nothing relevant found.
     """
     try:
         urls = await _search_google(home_team, away_team)
         if not urls:
-            return ""
+            return "", []
 
         snippets: list[str] = []
+        used_urls: list[str] = []
         for url in urls[:_MAX_RESULTS]:
             text = await _fetch_page_text(url)
             if text:
                 relevant = _extract_card_relevant(text)
                 if relevant:
                     snippets.append(relevant)
+                    used_urls.append(url)
 
         if not snippets:
-            return ""
+            return "", []
 
         # Combine and truncate
         combined = " | ".join(snippets)
         if len(combined) > 500:
             combined = combined[:497] + "..."
-        return combined
+        return combined, used_urls
 
     except Exception as e:
         logger.warning(f"News scraper failed for {home_team} vs {away_team}: {e}")
-        return ""
+        return "", []
 
 
 async def _search_google(home_team: str, away_team: str) -> list[str]:
