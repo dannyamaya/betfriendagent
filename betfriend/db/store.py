@@ -19,7 +19,15 @@ class Store:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        self._pool = await asyncpg.create_pool(dsn=settings.database_url)
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        self._pool = await asyncpg.create_pool(
+            dsn=settings.database_url,
+            ssl=ctx,
+            statement_cache_size=0,  # required for pgbouncer / Supabase pooler
+        )
         await self._create_tables()
         await self._seed_competitions()
         logger.info("DB store started")
