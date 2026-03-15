@@ -93,8 +93,8 @@ async def run() -> None:
 
     try:
         now = datetime.now(timezone.utc)
-        window_start = now + timedelta(minutes=10)
-        window_end = now + timedelta(minutes=20)
+        window_start = now
+        window_end = now + timedelta(minutes=35)
 
         upcoming = await store.get_unprocessed_upcoming(window_start, window_end)
 
