@@ -14,7 +14,7 @@ from betfriend.db.store import Store
 from betfriend.notifications.image import generate_pre_game_image
 from betfriend.notifications.telegram import TelegramNotifier
 from betfriend.analysis.cards import predict_cards
-from betfriend.scrapers.coaches import get_coach_aggressiveness
+from betfriend.scrapers.coaches import get_coach_aggressiveness, get_coach_by_team
 from betfriend.scrapers.news import get_match_news_context
 
 
@@ -249,14 +249,14 @@ async def run() -> None:
         tz = ZoneInfo(settings.timezone)
         kickoff_dt = fixture["kickoff"].astimezone(tz)
 
-        # Coach aggressiveness
-        home_coach_name = home_stats.get("coach") if home_stats else None
-        away_coach_name = away_stats.get("coach") if away_stats else None
+        # Coach aggressiveness — look up by team name
         home_coach_data = None
         away_coach_data = None
+        home_coach_name = get_coach_by_team(fixture["home_team_name"])
         if home_coach_name:
             score, desc = get_coach_aggressiveness(home_coach_name)
             home_coach_data = (home_coach_name, score, desc)
+        away_coach_name = get_coach_by_team(fixture["away_team_name"])
         if away_coach_name:
             score, desc = get_coach_aggressiveness(away_coach_name)
             away_coach_data = (away_coach_name, score, desc)

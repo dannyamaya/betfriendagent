@@ -53,6 +53,44 @@ _DESCRIPTIONS = {
 }
 
 
+# Team name -> coach name (2025-26 season)
+TEAM_COACHES: dict[str, str] = {
+    "Barcelona": "Hansi Flick",
+    "Real Madrid": "Carlo Ancelotti",
+    "Atletico Madrid": "Diego Simeone",
+    "Athletic Club": "Ernesto Valverde",
+    "Villarreal": "Marcelino Garcia Toral",
+    "Real Betis": "Manuel Pellegrini",
+    "Real Sociedad": "Imanol Alguacil",
+    "Sevilla": "Diego Martinez",
+    "Celta Vigo": "Eduardo Coudet",
+    "Rayo Vallecano": "Andoni Iraola",
+    "Getafe": "Pepe Bordalas",
+    "Osasuna": "Jagoba Arrasate",
+    "Mallorca": "Jagoba Arrasate",
+    "Girona": "Michel",
+    "Valencia": "Gennaro Gattuso",
+    "Espanyol": "Mauricio Pochettino",
+    "Alaves": "Luis Garcia Plaza",
+    "Valladolid": "Pacheta",
+    "Las Palmas": "Luis Miguel Ramis",
+    "Leganes": "Pepe Bordalas",
+    "Elche": "Abelardo Fernandez",
+    "Levante": "Alvaro Cervera",
+    "Granada": "Francisco Rodriguez",
+    "Andorra": "Jose Ramon Sandoval",
+}
+
+
+def get_coach_by_team(team_name: str) -> str | None:
+    """Get coach name by team name (fuzzy match)."""
+    team_lower = team_name.lower()
+    for team, coach in TEAM_COACHES.items():
+        if team.lower() in team_lower or team_lower in team.lower():
+            return coach
+    return None
+
+
 def get_coach_aggressiveness(coach_name: str) -> tuple[int, str]:
     """Return (score, description) for a coach.
 

@@ -338,34 +338,40 @@ class Store:
 
     async def upsert_referee(self, name: str) -> int:
         """Upsert referee with fuzzy matching on last name."""
+        from loguru import logger
         async with self.pool.acquire() as conn:
             # Exact match first
             row = await conn.fetchrow("SELECT id FROM referees WHERE name = $1", name)
             if row:
                 return row["id"]
 
-            # Fuzzy match: find by last name similarity
-            # Extract last significant word (skip initials like "J.")
-            words = [w for w in name.split() if len(w) > 2 and not w.endswith(".")]
+            # Fuzzy match: extract significant words (skip initials like "J.")
+            words = [w.rstrip(",") for w in name.split() if len(w) > 2 and not w.endswith(".")]
+            logger.info(f"  Referee fuzzy lookup: '{name}' -> words={words}")
+
             if words:
-                last_word = words[-1]  # Usually the last name
-                candidates = await conn.fetch(
-                    "SELECT id, name FROM referees WHERE name ILIKE $1 AND games > 0",
-                    f"%{last_word}%"
-                )
-                if len(candidates) == 1:
-                    # Unique match on last name — use existing referee
-                    return candidates[0]["id"]
-                elif len(candidates) > 1:
-                    # Multiple matches — try matching more words
-                    for candidate in candidates:
-                        c_words = [w for w in candidate["name"].split() if len(w) > 2 and not w.endswith(".")]
-                        # Check if first significant word also matches
-                        if len(words) >= 2 and len(c_words) >= 2:
-                            if words[0].lower()[:3] == c_words[0].lower()[:3]:
+                # Try each significant word to find candidates with games
+                for word in words:
+                    candidates = await conn.fetch(
+                        "SELECT id, name FROM referees WHERE name ILIKE $1 AND games > 0",
+                        f"%{word}%"
+                    )
+                    logger.info(f"    Word '{word}': {len(candidates)} candidates: {[c['name'] for c in candidates]}")
+
+                    if len(candidates) == 1:
+                        logger.info(f"    Unique match: {candidates[0]['name']} (id={candidates[0]['id']})")
+                        return candidates[0]["id"]
+                    elif len(candidates) > 1 and len(words) >= 2:
+                        # Multiple matches — check if any candidate contains another word too
+                        for candidate in candidates:
+                            c_lower = candidate["name"].lower()
+                            matching_words = sum(1 for w in words if w.lower() in c_lower)
+                            if matching_words >= 2:
+                                logger.info(f"    Multi-word match: {candidate['name']} (id={candidate['id']})")
                                 return candidate["id"]
 
             # No match found — create new
+            logger.warning(f"  Referee: no fuzzy match for '{name}', creating new entry")
             row = await conn.fetchrow("""
                 INSERT INTO referees (name) VALUES ($1)
                 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
