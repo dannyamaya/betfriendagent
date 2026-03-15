@@ -61,6 +61,17 @@ async def run() -> None:
             home_top_players = await store.get_top_card_players(home_id, 5)
             away_top_players = await store.get_top_card_players(away_id, 5)
 
+            # Referee data
+            referee_stats = None
+            referee_yc_rank = None
+            referee_total_refs = None
+            referee_last_games = None
+            if fixture["referee_id"]:
+                referee_stats = await store.get_referee_stats(fixture["referee_id"])
+                referee_yc_rank = await store.get_referee_yc_rank(fixture["referee_id"])
+                referee_total_refs = await store.get_total_referees_with_games()
+                referee_last_games = await store.get_referee_last_games(fixture["referee_id"], 3)
+
             msg = format_pre_game(
                 fixture,
                 home_stats=home_stats,
@@ -73,6 +84,10 @@ async def run() -> None:
                 away_form=away_form,
                 home_top_players=home_top_players,
                 away_top_players=away_top_players,
+                referee_stats=referee_stats,
+                referee_yc_rank=referee_yc_rank,
+                referee_total_refs=referee_total_refs,
+                referee_last_games=referee_last_games,
             )
             await telegram.send(msg)
 

@@ -69,6 +69,10 @@ def format_pre_game(
     away_form: list[asyncpg.Record] | None = None,
     home_top_players: list[asyncpg.Record] | None = None,
     away_top_players: list[asyncpg.Record] | None = None,
+    referee_stats: asyncpg.Record | None = None,
+    referee_yc_rank: int | None = None,
+    referee_total_refs: int | None = None,
+    referee_last_games: list[asyncpg.Record] | None = None,
 ) -> str:
     """Format a pre-game analysis message with card stats."""
     tz = ZoneInfo(settings.timezone)
@@ -137,7 +141,41 @@ def format_pre_game(
                     f"({p['games_played']}J, avg {p['yc_per_game']:.2f}/J)"
                 )
 
-    lines.append("")
-    lines.append("<i>Datos de arbitro disponibles pronto (Fase 3)</i>")
+    # --- Referee section ---
+    if referee_stats and referee_stats["games"] > 0:
+        lines.append("")
+        lines.append("<b>Arbitro</b>")
+        lines.append(f"  {referee_stats['name']}")
+
+        rank_str = ""
+        if referee_yc_rank and referee_total_refs:
+            rank_str = f" ({_ordinal(referee_yc_rank)} de {referee_total_refs} arbitros)"
+
+        lines.append(
+            f"  {referee_stats['total_yc']} YC / {referee_stats['total_rc']} RC "
+            f"en {referee_stats['games']} partidos{rank_str}"
+        )
+        lines.append(
+            f"  avg {referee_stats['yc_per_game']:.1f} YC/J | "
+            f"{referee_stats['rc_per_game']:.2f} RC/J"
+        )
+
+        if referee_last_games:
+            # Compute referee delta
+            ref_ycs = [g["total_yc"] for g in referee_last_games]
+            ref_avg = sum(ref_ycs) / len(ref_ycs) if ref_ycs else 0
+            ref_delta = stdev(ref_ycs) if len(ref_ycs) > 1 else 0
+            consistency = "consistente" if ref_delta < 1.5 else "variable"
+
+            lines.append(f"  Ultimos {len(referee_last_games)} partidos:")
+            for g in referee_last_games:
+                lines.append(
+                    f"    {g['home_team']} vs {g['away_team']}: "
+                    f"{g['total_yc']} YC / {g['total_rc']} RC"
+                )
+            lines.append(f"  delta {ref_delta:.1f} ({consistency})")
+    else:
+        lines.append("")
+        lines.append("<i>Arbitro: sin datos disponibles</i>")
 
     return "\n".join(lines)

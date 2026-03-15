@@ -85,6 +85,17 @@ class Store:
                     api_fetched_at  TIMESTAMPTZ
                 );
 
+                CREATE TABLE IF NOT EXISTS referees (
+                    id          SERIAL PRIMARY KEY,
+                    name        TEXT UNIQUE NOT NULL,
+                    total_yc    INT DEFAULT 0,
+                    total_rc    INT DEFAULT 0,
+                    games       INT DEFAULT 0,
+                    yc_per_game REAL DEFAULT 0,
+                    rc_per_game REAL DEFAULT 0,
+                    updated_at  TIMESTAMPTZ DEFAULT NOW()
+                );
+
                 CREATE TABLE IF NOT EXISTS players (
                     id          SERIAL PRIMARY KEY,
                     api_id      INT UNIQUE NOT NULL,
@@ -278,6 +289,90 @@ class Store:
                 "UPDATE fixtures SET processed = TRUE WHERE id = $1",
                 fixture_id,
             )
+
+    # ------------------------------------------------------------------
+    # Referees
+    # ------------------------------------------------------------------
+
+    async def upsert_referee(self, name: str) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO referees (name) VALUES ($1)
+                ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                RETURNING id
+            """, name)
+            return row["id"]  # type: ignore[index]
+
+    async def get_referee_by_name(self, name: str) -> asyncpg.Record | None:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow(
+                "SELECT * FROM referees WHERE name = $1", name
+            )
+
+    async def assign_referee_to_fixture(self, fixture_id: int, referee_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE fixtures SET referee_id = $1 WHERE id = $2",
+                referee_id, fixture_id
+            )
+
+    async def recompute_referee_stats(self) -> None:
+        """Recompute all referee stats from fixture card data."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE referees r SET
+                    total_yc = sub.total_yc,
+                    total_rc = sub.total_rc,
+                    games = sub.games,
+                    yc_per_game = CASE WHEN sub.games > 0 THEN sub.total_yc::REAL / sub.games ELSE 0 END,
+                    rc_per_game = CASE WHEN sub.games > 0 THEN sub.total_rc::REAL / sub.games ELSE 0 END,
+                    updated_at = NOW()
+                FROM (
+                    SELECT f.referee_id,
+                           COUNT(*) AS games,
+                           COALESCE(SUM(f.home_yc + f.away_yc), 0) AS total_yc,
+                           COALESCE(SUM(f.home_rc + f.away_rc), 0) AS total_rc
+                    FROM fixtures f
+                    WHERE f.referee_id IS NOT NULL
+                      AND f.status = 'finished'
+                    GROUP BY f.referee_id
+                ) sub
+                WHERE r.id = sub.referee_id
+            """)
+
+    async def get_referee_stats(self, referee_id: int) -> asyncpg.Record | None:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("SELECT * FROM referees WHERE id = $1", referee_id)
+
+    async def get_referee_yc_rank(self, referee_id: int) -> int | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT rank FROM (
+                    SELECT id, RANK() OVER (ORDER BY yc_per_game DESC) AS rank
+                    FROM referees WHERE games >= 3
+                ) sub WHERE sub.id = $1
+            """, referee_id)
+            return row["rank"] if row else None
+
+    async def get_referee_last_games(self, referee_id: int, n: int = 3) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT f.home_yc + f.away_yc AS total_yc,
+                       f.home_rc + f.away_rc AS total_rc,
+                       ht.name AS home_team, at.name AS away_team,
+                       f.kickoff
+                FROM fixtures f
+                JOIN teams ht ON f.home_team_id = ht.id
+                JOIN teams at ON f.away_team_id = at.id
+                WHERE f.referee_id = $1 AND f.status = 'finished'
+                ORDER BY f.kickoff DESC
+                LIMIT $2
+            """, referee_id, n)
+
+    async def get_total_referees_with_games(self) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT COUNT(*) AS cnt FROM referees WHERE games >= 3")
+            return row["cnt"]  # type: ignore[index]
 
     # ------------------------------------------------------------------
     # Players

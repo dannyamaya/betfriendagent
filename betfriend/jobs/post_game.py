@@ -205,12 +205,46 @@ async def run() -> None:
                     form=standing.get("form"),
                 )
 
+        # Backfill referees from API data for fixtures missing referee_id
+        logger.info("Backfilling referees from API fixture data...")
+        refs_assigned = 0
+        async with store.pool.acquire() as conn:
+            # The API stores referee name in the fixture response
+            # We need to re-fetch finished fixtures that have no referee_id
+            missing = await conn.fetch("""
+                SELECT api_id, id FROM fixtures
+                WHERE referee_id IS NULL AND status = 'finished'
+            """)
+
+        if missing:
+            for row in missing:
+                raw = await api.get_fixture_by_id(row["api_id"])
+                if raw:
+                    ref_name = raw.get("fixture", {}).get("referee")
+                    if ref_name:
+                        ref_name = ref_name.strip()
+                        if "," in ref_name:
+                            ref_name = ref_name.split(",")[0].strip()
+                        ref_id = await store.upsert_referee(ref_name)
+                        await store.assign_referee_to_fixture(row["id"], ref_id)
+                        refs_assigned += 1
+
+                remaining_budget = await budget.requests_remaining()
+                if remaining_budget < 30:
+                    logger.warning("Low API budget, stopping referee backfill")
+                    break
+
+            if refs_assigned > 0:
+                await store.recompute_referee_stats()
+                logger.info(f"Assigned {refs_assigned} referees")
+
         remaining = await budget.requests_remaining()
         summary = (
             f"<b>BetFriend - Post-Game Update</b>\n\n"
             f"Date: {yesterday}\n"
             f"Fixtures updated: {fixtures_updated}\n"
             f"Player records added: {player_records}\n"
+            f"Referees assigned: {refs_assigned}\n"
             f"API requests remaining: {remaining}"
         )
         await telegram.send(summary)
