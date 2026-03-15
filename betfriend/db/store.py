@@ -413,6 +413,85 @@ class Store:
             return row["id"] if row else None
 
     # ------------------------------------------------------------------
+    # Pre-game analysis queries
+    # ------------------------------------------------------------------
+
+    async def get_team_stats(self, team_id: int) -> asyncpg.Record | None:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("""
+                SELECT tss.*, t.name AS team_name
+                FROM team_season_stats tss
+                JOIN teams t ON t.id = tss.team_id
+                WHERE tss.team_id = $1
+            """, team_id)
+
+    async def get_team_yc_rank(self, team_id: int) -> int | None:
+        """Get team's YC ranking within its competition (1 = most cards)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT rank FROM (
+                    SELECT tss.team_id,
+                           RANK() OVER (ORDER BY tss.total_yc DESC) AS rank
+                    FROM team_season_stats tss
+                    JOIN teams t ON t.id = tss.team_id
+                    WHERE t.competition_id = (SELECT competition_id FROM teams WHERE id = $1)
+                ) sub
+                WHERE sub.team_id = $1
+            """, team_id)
+            return row["rank"] if row else None
+
+    async def get_team_rc_rank(self, team_id: int) -> int | None:
+        """Get team's RC ranking within its competition (1 = most cards)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT rank FROM (
+                    SELECT tss.team_id,
+                           RANK() OVER (ORDER BY tss.total_rc DESC) AS rank
+                    FROM team_season_stats tss
+                    JOIN teams t ON t.id = tss.team_id
+                    WHERE t.competition_id = (SELECT competition_id FROM teams WHERE id = $1)
+                ) sub
+                WHERE sub.team_id = $1
+            """, team_id)
+            return row["rank"] if row else None
+
+    async def get_top_card_players(self, team_id: int, limit: int = 5) -> list[asyncpg.Record]:
+        """Get top card-getting players for a team."""
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT p.name, pcs.total_yc, pcs.total_rc, pcs.games_played,
+                       pcs.yc_per_game, pcs.rc_per_game
+                FROM player_card_stats pcs
+                JOIN players p ON p.id = pcs.player_id
+                WHERE p.team_id = $1
+                  AND pcs.games_played > 0
+                ORDER BY pcs.total_yc DESC
+                LIMIT $2
+            """, team_id, limit)
+
+    async def get_player_league_yc_rank(self, player_id: int) -> int | None:
+        """Get player's YC ranking across the entire competition."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT rank FROM (
+                    SELECT pcs.player_id,
+                           RANK() OVER (ORDER BY pcs.total_yc DESC) AS rank
+                    FROM player_card_stats pcs
+                    JOIN players p ON p.id = pcs.player_id
+                    WHERE p.team_id IN (
+                        SELECT id FROM teams WHERE competition_id = (
+                            SELECT competition_id FROM teams WHERE id = (
+                                SELECT team_id FROM players WHERE id = $1
+                            )
+                        )
+                    )
+                    AND pcs.games_played > 0
+                ) sub
+                WHERE sub.player_id = $1
+            """, player_id)
+            return row["rank"] if row else None
+
+    # ------------------------------------------------------------------
     # API Request Log
     # ------------------------------------------------------------------
 
