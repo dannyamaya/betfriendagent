@@ -115,7 +115,38 @@ async def run() -> None:
         away_id = fixture["away_team_id"]
         fixture_db_id = fixture["id"]
 
-        logger.info(f"Testing: {fixture['home_team_name']} vs {fixture['away_team_name']} (referee_id={fixture['referee_id']})")
+        logger.info(f"Testing: {fixture['home_team_name']} vs {fixture['away_team_name']} (referee_id={fixture['referee_id']}, matchday={fixture['matchday']})")
+
+        # If no referee, try RFEF PDF
+        if fixture["referee_id"] is None and fixture["matchday"]:
+            from betfriend.scrapers.rfef_pdf import fetch_referee_designations, match_referee_to_fixture
+            # Determine league_id from competition
+            async with store.pool.acquire() as conn:
+                comp_row = await conn.fetchrow("SELECT api_id FROM competitions WHERE id=$1", fixture["competition_id"])
+            league_api_id = comp_row["api_id"] if comp_row else None
+            if league_api_id:
+                logger.info(f"  Trying RFEF PDF for league {league_api_id}, jornada {fixture['matchday']}")
+                designations = await fetch_referee_designations(league_api_id, fixture["matchday"])
+                logger.info(f"  RFEF designations found: {len(designations)} — {designations}")
+                if designations:
+                    ref_name = match_referee_to_fixture(
+                        designations, fixture["home_team_name"], fixture["away_team_name"]
+                    )
+                    if ref_name:
+                        ref_id = await store.upsert_referee(ref_name)
+                        await store.assign_referee_to_fixture(fixture_db_id, ref_id)
+                        await store.recompute_referee_stats()
+                        # Re-fetch fixture to get referee_id
+                        db_fixtures = await store.get_fixtures_by_date(today)
+                        for f in db_fixtures:
+                            if f["id"] == fixture_db_id:
+                                fixture = f
+                                break
+                        logger.info(f"  Assigned referee '{ref_name}' (id={ref_id})")
+                    else:
+                        logger.warning(f"  Could not match referee for {fixture['home_team_name']} vs {fixture['away_team_name']}")
+                else:
+                    logger.warning("  No RFEF PDF found for this matchday")
 
         # Try to fetch lineup (might not be available yet)
         from betfriend.jobs.pre_game_check import _fetch_and_store_lineup
