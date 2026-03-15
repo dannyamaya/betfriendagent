@@ -1,8 +1,7 @@
 """Bootstrap job — one-shot DB population (run with paid API tier).
 
 Fetches all season fixtures, events, player cards, and team stats
-for La Liga and La Liga 2. Designed to run once and fill the DB
-with historical data.
+for La Liga and La Liga 2. Resumable: skips fixtures already processed.
 
 Trigger manually: gh workflow run bootstrap.yml
 """
@@ -19,6 +18,103 @@ from betfriend.config.settings import settings
 from betfriend.db.store import Store
 from betfriend.notifications.telegram import TelegramNotifier
 
+CONCURRENCY = 5  # parallel API calls
+
+
+async def process_fixture(
+    fixture_api_id: int,
+    info: dict,
+    api: APIFootballClient,
+    store: Store,
+    semaphore: asyncio.Semaphore,
+) -> dict | None:
+    """Fetch player stats for one fixture and save to DB. Returns card totals."""
+    async with semaphore:
+        players_data = await api.get_fixture_players(fixture_api_id)
+        if not players_data:
+            return None
+
+        fixture_db_id = info["db_id"]
+        match_date = info["kickoff"].date() if hasattr(info["kickoff"], "date") else info["kickoff"]
+
+        home_yc = 0
+        home_rc = 0
+        away_yc = 0
+        away_rc = 0
+        player_count = 0
+
+        for team_data in players_data:
+            team_api_id = team_data["team"]["id"]
+            team_db_id = await store.get_team_id(team_api_id)
+            if not team_db_id:
+                continue
+
+            is_home = team_db_id == info["home_team_id"]
+
+            for player_entry in team_data.get("players", []):
+                p = player_entry["player"]
+                stats_list = player_entry.get("statistics", [])
+                if not stats_list:
+                    continue
+                stats = stats_list[0]
+
+                player_id = await store.upsert_player(
+                    api_id=p["id"],
+                    name=p["name"],
+                    photo_url=p.get("photo"),
+                    team_id=team_db_id,
+                    position=stats.get("games", {}).get("position"),
+                )
+
+                yc = stats.get("cards", {}).get("yellow") or 0
+                rc = stats.get("cards", {}).get("red") or 0
+                minutes = stats.get("games", {}).get("minutes") or 0
+
+                if minutes > 0:
+                    await store.upsert_player_fixture_card(
+                        player_id=player_id,
+                        fixture_id=fixture_db_id,
+                        yellow_cards=yc,
+                        red_cards=rc,
+                        minutes_played=minutes,
+                    )
+                    player_count += 1
+
+                if is_home:
+                    home_yc += yc
+                    home_rc += rc
+                else:
+                    away_yc += yc
+                    away_rc += rc
+
+        # Update fixture card totals
+        async with store.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE fixtures SET home_yc=$1, away_yc=$2, home_rc=$3, away_rc=$4
+                WHERE id=$5
+            """, home_yc, away_yc, home_rc, away_rc, fixture_db_id)
+
+        # Track team form
+        for team_id, yc, rc, is_home in [
+            (info["home_team_id"], home_yc, home_rc, True),
+            (info["away_team_id"], away_yc, away_rc, False),
+        ]:
+            await store.upsert_team_form(
+                team_id=team_id,
+                fixture_id=fixture_db_id,
+                yc=yc, rc=rc,
+                is_home=is_home,
+                match_date=match_date,
+            )
+
+        return {
+            "home_team_id": info["home_team_id"],
+            "away_team_id": info["away_team_id"],
+            "home_yc": home_yc, "home_rc": home_rc,
+            "away_yc": away_yc, "away_rc": away_rc,
+            "player_count": player_count,
+        }
+
 
 async def run() -> None:
     store = Store()
@@ -27,6 +123,7 @@ async def run() -> None:
     budget = BudgetTracker(store)
     api = APIFootballClient(store, budget)
     telegram = TelegramNotifier()
+    semaphore = asyncio.Semaphore(CONCURRENCY)
 
     try:
         total_fixtures = 0
@@ -44,7 +141,7 @@ async def run() -> None:
             raw_fixtures = await api.get_all_fixtures(league_id)
             logger.info(f"  Fixtures: {len(raw_fixtures)} total")
 
-            fixture_map: dict[int, dict] = {}  # api_id -> {db_id, home_team_id, away_team_id, status, parsed}
+            fixture_map: dict[int, dict] = {}
 
             for raw in raw_fixtures:
                 parsed = parse_fixture(raw)
@@ -93,109 +190,78 @@ async def run() -> None:
             total_fixtures += len(raw_fixtures)
 
             # ----------------------------------------------------------
-            # Step 2: Fetch player stats for finished fixtures
+            # Step 2: Fetch player stats — skip already processed
             # ----------------------------------------------------------
             finished = [
                 (api_id, info) for api_id, info in fixture_map.items()
                 if info["status"] == "finished"
             ]
-            logger.info(f"  Finished fixtures to process: {len(finished)}")
 
-            # Track card totals per team for this league
-            team_cards: dict[int, dict] = {}  # team_id -> {yc, rc, games}
+            # Check which fixtures already have player_fixture_cards data
+            to_process = []
+            for api_id, info in finished:
+                async with store.pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT COUNT(*) AS cnt FROM player_fixture_cards WHERE fixture_id = $1",
+                        info["db_id"]
+                    )
+                if row["cnt"] == 0:
+                    to_process.append((api_id, info))
 
-            for i, (fixture_api_id, info) in enumerate(finished):
-                if i % 50 == 0:
-                    remaining = await budget.requests_remaining()
-                    logger.info(f"  Processing fixture {i+1}/{len(finished)} (API budget: {remaining})")
+            logger.info(f"  Finished: {len(finished)}, already done: {len(finished) - len(to_process)}, to process: {len(to_process)}")
 
-                # Get player-level stats for this fixture
-                players_data = await api.get_fixture_players(fixture_api_id)
-                if not players_data:
-                    continue
+            # Process in batches of CONCURRENCY
+            team_cards: dict[int, dict] = {}
 
-                fixture_db_id = info["db_id"]
-                match_date = info["kickoff"].date() if hasattr(info["kickoff"], "date") else info["kickoff"]
+            for batch_start in range(0, len(to_process), CONCURRENCY):
+                batch = to_process[batch_start:batch_start + CONCURRENCY]
+                remaining = await budget.requests_remaining()
+                logger.info(f"  Batch {batch_start+1}-{batch_start+len(batch)}/{len(to_process)} (API budget: {remaining})")
 
-                home_yc = 0
-                home_rc = 0
-                away_yc = 0
-                away_rc = 0
+                tasks = [
+                    process_fixture(api_id, info, api, store, semaphore)
+                    for api_id, info in batch
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                for team_data in players_data:
-                    team_api_id = team_data["team"]["id"]
-                    team_db_id = await store.get_team_id(team_api_id)
-                    if not team_db_id:
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"  Error processing fixture: {result}")
+                        continue
+                    if result is None:
                         continue
 
-                    is_home = team_db_id == info["home_team_id"]
+                    total_events += 1
+                    total_players += result["player_count"]
 
-                    for player_entry in team_data.get("players", []):
-                        p = player_entry["player"]
-                        stats_list = player_entry.get("statistics", [])
-                        if not stats_list:
-                            continue
-                        stats = stats_list[0]
+                    for team_id, yc, rc in [
+                        (result["home_team_id"], result["home_yc"], result["home_rc"]),
+                        (result["away_team_id"], result["away_yc"], result["away_rc"]),
+                    ]:
+                        if team_id not in team_cards:
+                            team_cards[team_id] = {"yc": 0, "rc": 0, "games": 0}
+                        team_cards[team_id]["yc"] += yc
+                        team_cards[team_id]["rc"] += rc
+                        team_cards[team_id]["games"] += 1
 
-                        player_id = await store.upsert_player(
-                            api_id=p["id"],
-                            name=p["name"],
-                            photo_url=p.get("photo"),
-                            team_id=team_db_id,
-                            position=stats.get("games", {}).get("position"),
-                        )
-
-                        yc = stats.get("cards", {}).get("yellow") or 0
-                        rc = stats.get("cards", {}).get("red") or 0
-                        minutes = stats.get("games", {}).get("minutes") or 0
-
-                        if minutes > 0:
-                            await store.upsert_player_fixture_card(
-                                player_id=player_id,
-                                fixture_id=fixture_db_id,
-                                yellow_cards=yc,
-                                red_cards=rc,
-                                minutes_played=minutes,
-                            )
-                            total_players += 1
-
-                        if is_home:
-                            home_yc += yc
-                            home_rc += rc
-                        else:
-                            away_yc += yc
-                            away_rc += rc
-
-                # Update fixture card totals
+            # Also count already-processed fixtures for team_cards
+            for api_id, info in finished:
+                if (api_id, info) in to_process:
+                    continue
                 async with store.pool.acquire() as conn:
-                    await conn.execute("""
-                        UPDATE fixtures SET home_yc=$1, away_yc=$2, home_rc=$3, away_rc=$4
-                        WHERE id=$5
-                    """, home_yc, away_yc, home_rc, away_rc, fixture_db_id)
-
-                # Track team form
-                for team_id, yc, rc, is_home in [
-                    (info["home_team_id"], home_yc, home_rc, True),
-                    (info["away_team_id"], away_yc, away_rc, False),
-                ]:
-                    await store.upsert_team_form(
-                        team_id=team_id,
-                        fixture_id=fixture_db_id,
-                        yc=yc, rc=rc,
-                        is_home=is_home,
-                        match_date=match_date,
-                    )
-
-                    if team_id not in team_cards:
-                        team_cards[team_id] = {"yc": 0, "rc": 0, "games": 0}
-                    team_cards[team_id]["yc"] += yc
-                    team_cards[team_id]["rc"] += rc
-                    team_cards[team_id]["games"] += 1
-
-                total_events += 1
-
-                # Small delay to be nice to the API
-                await asyncio.sleep(0.1)
+                    row = await conn.fetchrow("""
+                        SELECT home_yc, away_yc, home_rc, away_rc FROM fixtures WHERE id = $1
+                    """, info["db_id"])
+                if row:
+                    for team_id, yc, rc in [
+                        (info["home_team_id"], row["home_yc"], row["home_rc"]),
+                        (info["away_team_id"], row["away_yc"], row["away_rc"]),
+                    ]:
+                        if team_id not in team_cards:
+                            team_cards[team_id] = {"yc": 0, "rc": 0, "games": 0}
+                        team_cards[team_id]["yc"] += yc
+                        team_cards[team_id]["rc"] += rc
+                        team_cards[team_id]["games"] += 1
 
             # ----------------------------------------------------------
             # Step 3: Compute player card stats from fixture data
@@ -222,7 +288,7 @@ async def run() -> None:
                 )
 
             # ----------------------------------------------------------
-            # Step 4: Fetch standings and team stats
+            # Step 4: Fetch standings
             # ----------------------------------------------------------
             logger.info("  Fetching standings...")
             standings = await api.get_standings(league_id)
@@ -235,9 +301,7 @@ async def run() -> None:
                     "form": entry.get("form"),
                 }
 
-            # Save team season stats
             for team_id, card_data in team_cards.items():
-                # Look up team api_id to get standings
                 async with store.pool.acquire() as conn:
                     row = await conn.fetchrow("SELECT api_id FROM teams WHERE id = $1", team_id)
                 team_api_id = row["api_id"] if row else None
@@ -253,14 +317,16 @@ async def run() -> None:
                     form=standing.get("form"),
                 )
 
+            logger.info(f"  {league_name} done!")
+
         # ----------------------------------------------------------
-        # Done — send summary to Telegram
+        # Done
         # ----------------------------------------------------------
         remaining = await budget.requests_remaining()
         summary = (
             f"<b>BetFriend - Bootstrap Complete</b>\n\n"
             f"Fixtures loaded: {total_fixtures}\n"
-            f"Fixtures with events: {total_events}\n"
+            f"Fixtures with events processed: {total_events}\n"
             f"Player-fixture records: {total_players}\n"
             f"API requests remaining today: {remaining}"
         )
