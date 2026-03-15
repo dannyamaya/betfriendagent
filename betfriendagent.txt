@@ -1,0 +1,63 @@
+App that provides bet analysis based on data heuristics.
+multiple strategies design
+We are main focused on avoid API consume, try to keep info in the app and db we only have 100req/day
+First Strategy Cards over La Liga and La Liga 2
+    1. daily request on the api to know the fixtures for that day 
+    2. before 30 mins of each game we need update this data
+        2.1 total yellow and red cards per team and player of this fixture (store that in db)
+        2.2 check official line up for each team and create a %delta (probably we need to scrap some pages for that)
+        2.3 get referee data (the api seems to struggle with this data but every day the rfef published "el acta" with referee designation maybe we can do this for the first game of the day and store the data example for tomorrow https://rfef.es/sites/default/files/designaciones_2a_division_masculina_-_temp_2025-26_-_jornada_30_domingo.pdf)
+        2.4 in referee data we need all the yellow and red cards for La Liga and La liga 2, avg cards, delta of cards (for example a referee with 10 cards in two games is only reliable if was 5 and 5 not 9 and 1 that could be a special case) 
+        2.5 we need the coach data, a team lead by Simeone is more aggresive that one by Ancelotti so we need to find a way to rank coaches)
+        2.6 in teams we need the total and avg for the last 5 games with the delta
+        2.7 the last 3 head to head of this fixture 
+        2.8 a bias for news, we need to scrap some articles in marca or specialez websites, need to know if they are fighitng for european cups for exmaple or any other thing
+        2.9 total cards by player by competition, we need to rank this and assign a value with the data for all the players nad in each fixture
+
+   
+
+for example tomorrow is Betis vs Celta de Vigo I would like a message in telegram 30 mins like this (JUST AN EXAMPLE this format could change and probably you could do it Better)
+Im creating a line for each statistic but eventually we can simplify this, first for letting you know all
+
+Betis vs Celta de Vigo 3/15/2026 12:30pm
+posicion en la tabla Betis: 5to
+posicion en la tabla Celta: 6to
+Betis total yellow cards: 60 (8to en la Liga mas amarillas)
+Celta total yellow cards: 80 (1ro en la liga mas amarilla)
+Betis total red cards: 5 (13th en la Liga mas rojas)
+Celta total red cards: 80 (2do en la liga mas rojas)
+yellow/red cards by lineups
+Betis
+andres perez amarillas total  8, 7to in La Liga (over all the players all the teams) 1th in this game avg 1.3  
+
+so on with all the line up for each team and same with red cards
+
+Referee: Rafael Refer
+total yc and rc:
+7to of all referees that had at least one game in la liga (or liga2 depending of the competition)
+number of games:
+delta:
+last 3 games data yc and rc for each game
+
+Coachs data: simenone vs ancelotti (lets plan this analysis maybe scraping data from webstites i dont know help me)
+Partido entre tecnico ultra defensivo y tecnico controlador, probablemente mas tarjetas para el equipo de Simeone
+
+Bias news: 3 articulos distintos marcan este partido como caliente, se pelean posiciones europea sin embargo el betis juega en 3 dias por europa league la clasificacion a la final probablemente deje jugadores en la banca
+
+Betfriend pronostic: > 5 tarjetas en el aprtido, >3 betis >2 para Celta, Tarjeta roja probabilidad muy alta
+jugador celta Juan probable alta cara amarilla (recibe amarilla cada 1.5 partidos y mas de visitante)
+
+Something like that, this is not an accuracy odd provider is an assistant really well informed.
+
+
+About Architecture
+    docker
+    fast api
+    postgres
+    python
+
+extras
+    API-Football free
+    I know its a lot of data at the beginning to get probably we have to wait for rqeuest reset of if definetly we need to acquire
+    you know what, help me to analyze this, certainly there are referees with more odds to give us yc and rc but thats not all the games
+    si por ejemplo a un arbitro "se le va la olla" y en un partido saca 10 tarjetas a este le llaman la atencion y probablemente el siguiente no saque tantas por eso es importante el delta pero despues puede re ajustar el que le gusta sacar tarjetas lo hace tarde o temprano
