@@ -117,8 +117,14 @@ async def run() -> None:
 
         logger.info(f"Testing: {fixture['home_team_name']} vs {fixture['away_team_name']} (referee_id={fixture['referee_id']}, matchday={fixture['matchday']})")
 
-        # If no referee, try RFEF PDF
-        if fixture["referee_id"] is None and fixture["matchday"]:
+        # If no referee or referee has 0 games (bad match), try RFEF PDF
+        needs_referee = fixture["referee_id"] is None
+        if fixture["referee_id"] is not None:
+            ref_check = await store.get_referee_stats(fixture["referee_id"])
+            if ref_check and ref_check.get("games", 0) == 0:
+                needs_referee = True
+                logger.info(f"  Referee id={fixture['referee_id']} has 0 games, re-doing lookup")
+        if needs_referee and fixture["matchday"]:
             from betfriend.scrapers.rfef_pdf import fetch_referee_designations, match_referee_to_fixture
             # Determine league_id from competition
             async with store.pool.acquire() as conn:
