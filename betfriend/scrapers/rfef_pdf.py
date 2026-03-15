@@ -36,7 +36,9 @@ async def _discover_pdf_urls(league_id: int, matchday: int | None = None) -> lis
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http:
             resp = await http.get(RFEF_DESIGNATIONS_URL, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; BetFriend/1.0)"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
             })
             if resp.status_code != 200:
                 logger.warning(f"RFEF page returned {resp.status_code}")
@@ -76,8 +78,8 @@ async def _discover_pdf_urls(league_id: int, matchday: int | None = None) -> lis
     except Exception as e:
         logger.warning(f"Failed to scrape RFEF designations page: {e}")
 
-    # Also try direct URL patterns as fallback
-    if not urls and matchday:
+    # Always try direct URL patterns as fallback
+    if matchday:
         division_map = {
             140: "1a_division_masculina",
             141: "2a_division_masculina",
@@ -107,12 +109,14 @@ async def fetch_referee_designations(
 
     designations: dict[str, str] = {}
 
+    _headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+    }
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http:
         for url in urls:
             try:
-                resp = await http.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; BetFriend/1.0)"
-                })
+                resp = await http.get(url, headers=_headers)
                 if resp.status_code != 200:
                     continue
 
