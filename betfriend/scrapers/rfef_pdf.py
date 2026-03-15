@@ -40,45 +40,34 @@ async def _discover_pdf_urls(league_id: int, matchday: int | None = None) -> lis
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
             })
-            if resp.status_code != 200:
-                logger.warning(f"RFEF page returned {resp.status_code}")
-                return urls
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "lxml")
+                for link in soup.find_all("a", href=True):
+                    href = link["href"]
+                    text = (link.get_text() + " " + href).lower()
 
-            soup = BeautifulSoup(resp.text, "lxml")
-
-            # Find all links that point to PDF files
-            for link in soup.find_all("a", href=True):
-                href = link["href"]
-                text = (link.get_text() + " " + href).lower()
-
-                if not href.endswith(".pdf") and "/files/" not in href:
-                    continue
-
-                # Check if it matches our division
-                if not any(kw in text for kw in keywords):
-                    continue
-
-                # Check matchday if specified
-                if matchday:
-                    jornada_match = re.search(r'jornada[_\s-]*(\d+)', text)
-                    if jornada_match:
-                        found_md = int(jornada_match.group(1))
-                        if found_md != matchday:
+                    if not href.endswith(".pdf") and "/files/" not in href:
+                        continue
+                    if not any(kw in text for kw in keywords):
+                        continue
+                    if matchday:
+                        jornada_match = re.search(r'jornada[_\s-]*(\d+)', text)
+                        if jornada_match and int(jornada_match.group(1)) != matchday:
                             continue
 
-                # Build full URL
-                if href.startswith("/"):
-                    href = f"https://rfef.es{href}"
-                elif not href.startswith("http"):
-                    href = f"https://rfef.es/{href}"
-
-                urls.append(href)
-                logger.info(f"  Found RFEF PDF: {href}")
+                    if href.startswith("/"):
+                        href = f"https://rfef.es{href}"
+                    elif not href.startswith("http"):
+                        href = f"https://rfef.es/{href}"
+                    urls.append(href)
+                    logger.info(f"  Found RFEF PDF from page: {href}")
+            else:
+                logger.warning(f"RFEF page returned {resp.status_code}, using direct URL fallback")
 
     except Exception as e:
         logger.warning(f"Failed to scrape RFEF designations page: {e}")
 
-    # Always try direct URL patterns as fallback
+    # Always try direct URL patterns (these are predictable)
     if matchday:
         division_map = {
             140: "1a_division_masculina",
@@ -103,8 +92,8 @@ async def fetch_referee_designations(
     Returns a dict mapping normalized match key to referee name.
     """
     urls = await _discover_pdf_urls(league_id, matchday)
+    logger.info(f"  RFEF: {len(urls)} URLs to try for league {league_id}, matchday {matchday}")
     if not urls:
-        logger.info(f"  No RFEF PDF URLs found for league {league_id}, matchday {matchday}")
         return {}
 
     designations: dict[str, str] = {}
