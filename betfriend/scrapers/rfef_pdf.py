@@ -121,83 +121,57 @@ async def fetch_referee_designations(
 
 
 def _parse_pdf(content: bytes) -> dict[str, str]:
-    """Parse referee designations from PDF content."""
+    """Parse referee designations from PDF content.
+
+    RFEF PDF format:
+    - Each match has a table row: [date, home_team, away_team, time]
+    - Below each table: "Árbitro:Name 4º Árbitro:..."
+    - We use text extraction to pair matches with their referees.
+    """
     designations: dict[str, str] = {}
 
     try:
         with pdfplumber.open(BytesIO(content)) as pdf:
             for page in pdf.pages:
-                # Log raw text for debugging
                 text = page.extract_text()
-                if text:
-                    logger.info(f"    PDF text (first 500 chars): {text[:500]}")
+                if not text:
+                    continue
 
-                # Try table extraction first
+                # Also get tables to know the match teams
                 tables = page.extract_tables()
-                logger.info(f"    PDF tables found: {len(tables)}")
-                for i, table in enumerate(tables):
-                    logger.info(f"    Table {i} rows: {len(table)}, first row: {table[0] if table else 'empty'}")
-                    designations.update(_parse_table(table))
+                matches_in_order = []
+                for table in tables:
+                    if table and len(table) >= 1:
+                        row = table[0]
+                        if len(row) >= 3:
+                            home = str(row[1] or "").strip()
+                            away = str(row[2] or "").strip()
+                            if home and away:
+                                matches_in_order.append((home, away))
 
-                # Fallback: text extraction
-                if not designations and text:
-                    designations.update(_parse_text(text))
+                # Parse text to find "Árbitro:" lines
+                lines = text.split("\n")
+                referees_in_order = []
+                for line in lines:
+                    if "rbitro:" in line and "4" not in line.split("rbitro:")[0][-2:]:
+                        # Line like "Árbitro:Juan Martínez 4º Árbitro:..."
+                        match = re.search(r'[ÁáA]rbitro:\s*(.+?)(?:\s+4[ºo°]|\s+$)', line)
+                        if match:
+                            ref_name = match.group(1).strip()
+                            if ref_name and len(ref_name) > 2:
+                                referees_in_order.append(ref_name)
+
+                # Match them up by order
+                for i, (home, away) in enumerate(matches_in_order):
+                    if i < len(referees_in_order):
+                        key = _normalize_match_key(f"{home} - {away}")
+                        designations[key] = referees_in_order[i]
+                        logger.info(f"    {home} vs {away} -> {referees_in_order[i]} (key={key})")
+
     except Exception as e:
         logger.error(f"  Failed to parse RFEF PDF: {e}")
 
     return designations
-
-
-def _parse_table(table: list[list[str | None]]) -> dict[str, str]:
-    """Extract match->referee mappings from a PDF table."""
-    result: dict[str, str] = {}
-
-    if not table or len(table) < 2:
-        return result
-
-    header = [str(cell).lower().strip() if cell else "" for cell in table[0]]
-
-    match_col = None
-    ref_col = None
-    for i, h in enumerate(header):
-        if any(kw in h for kw in ["partido", "match", "encuentro", "enfrentamiento"]):
-            match_col = i
-        if any(kw in h for kw in ["árbitro", "arbitro", "referee", "principal"]):
-            ref_col = i
-
-    if match_col is None or ref_col is None:
-        if len(header) >= 2:
-            match_col = 0
-            ref_col = 1
-        else:
-            return result
-
-    for row in table[1:]:
-        if not row or len(row) <= max(match_col, ref_col):
-            continue
-        match_str = str(row[match_col] or "").strip()
-        ref_str = str(row[ref_col] or "").strip()
-
-        if match_str and ref_str and len(ref_str) > 2:
-            key = _normalize_match_key(match_str)
-            if key:
-                result[key] = ref_str
-                logger.debug(f"    PDF table: '{match_str}' -> '{ref_str}' (key={key})")
-
-    return result
-
-
-def _parse_text(text: str) -> dict[str, str]:
-    """Fallback: try to extract referee from plain text."""
-    result: dict[str, str] = {}
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if " - " in line and i + 1 < len(lines):
-            match_key = _normalize_match_key(line)
-            next_line = lines[i + 1].strip()
-            if next_line and " - " not in next_line:
-                result[match_key] = next_line
-    return result
 
 
 def _normalize_match_key(match_str: str) -> str:
