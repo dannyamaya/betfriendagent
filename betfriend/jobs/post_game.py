@@ -205,34 +205,40 @@ async def run() -> None:
                     form=standing.get("form"),
                 )
 
-        # Backfill referees from API data for fixtures missing referee_id
+        # Backfill referees using get_all_fixtures (2 API calls total)
         logger.info("Backfilling referees from API fixture data...")
         refs_assigned = 0
+
+        # Get all fixtures missing referee_id
         async with store.pool.acquire() as conn:
-            # The API stores referee name in the fixture response
-            # We need to re-fetch finished fixtures that have no referee_id
-            missing = await conn.fetch("""
-                SELECT api_id, id FROM fixtures
-                WHERE referee_id IS NULL AND status = 'finished'
-            """)
+            missing_ids = {
+                row["api_id"]
+                for row in await conn.fetch(
+                    "SELECT api_id FROM fixtures WHERE referee_id IS NULL AND status = 'finished'"
+                )
+            }
 
-        if missing:
-            for row in missing:
-                raw = await api.get_fixture_by_id(row["api_id"])
-                if raw:
-                    ref_name = raw.get("fixture", {}).get("referee")
-                    if ref_name:
-                        ref_name = ref_name.strip()
-                        if "," in ref_name:
-                            ref_name = ref_name.split(",")[0].strip()
+        if missing_ids:
+            logger.info(f"  {len(missing_ids)} fixtures missing referee")
+            for league_id in (settings.la_liga_id, settings.la_liga2_id):
+                # 1 API call per league — gets ALL fixtures with referee names
+                all_raw = await api.get_all_fixtures(league_id)
+                for raw in all_raw:
+                    parsed = parse_fixture(raw)
+                    if parsed["api_id"] not in missing_ids:
+                        continue
+                    ref_name = parsed.get("referee")
+                    if not ref_name:
+                        continue
+                    ref_name = ref_name.strip()
+                    if "," in ref_name:
+                        ref_name = ref_name.split(",")[0].strip()
+
+                    fixture_db_id = await store.get_fixture_id_by_api_id(parsed["api_id"])
+                    if fixture_db_id:
                         ref_id = await store.upsert_referee(ref_name)
-                        await store.assign_referee_to_fixture(row["id"], ref_id)
+                        await store.assign_referee_to_fixture(fixture_db_id, ref_id)
                         refs_assigned += 1
-
-                remaining_budget = await budget.requests_remaining()
-                if remaining_budget < 30:
-                    logger.warning("Low API budget, stopping referee backfill")
-                    break
 
             if refs_assigned > 0:
                 await store.recompute_referee_stats()

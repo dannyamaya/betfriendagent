@@ -98,12 +98,13 @@ async def run() -> None:
                     matchdays_to_scrape.add((league_id, matchday))
 
         # Try RFEF PDFs for referee assignments on fixtures missing referee
+        rfef_warnings: list[str] = []
         for league_id, matchday in matchdays_to_scrape:
-            logger.info(f"Trying RFEF PDF for league {league_id}, matchday {matchday}")
+            league_name = "La Liga" if league_id == settings.la_liga_id else "La Liga 2"
+            logger.info(f"Trying RFEF PDF for {league_name}, matchday {matchday}")
             designations = await fetch_referee_designations(league_id, matchday)
             if designations:
                 logger.info(f"  Found {len(designations)} referee designations")
-                # Match designations to today's fixtures
                 db_fixtures = await store.get_fixtures_by_date(today)
                 for f in db_fixtures:
                     if f["referee_id"] is not None:
@@ -115,6 +116,22 @@ async def run() -> None:
                         fixture_db_id = f["id"]
                         await _assign_referee(store, fixture_db_id, ref_name)
                         logger.info(f"  Assigned referee {ref_name} to {f['home_team_name']} vs {f['away_team_name']}")
+                    else:
+                        rfef_warnings.append(
+                            f"No pude asignar arbitro para {f['home_team_name']} vs {f['away_team_name']} ({league_name})"
+                        )
+            else:
+                rfef_warnings.append(f"No se pudo descargar PDF de RFEF para {league_name} jornada {matchday}")
+
+        # Alert if RFEF scraping had issues
+        if rfef_warnings:
+            warning_msg = (
+                "<b>⚠ BetFriend - RFEF PDF Alert</b>\n\n"
+                + "\n".join(f"• {w}" for w in rfef_warnings)
+                + "\n\n<i>Los arbitros se asignaran desde la API si estan disponibles</i>"
+            )
+            await telegram.send(warning_msg)
+            logger.warning(f"RFEF PDF issues: {rfef_warnings}")
 
         # Recompute referee stats
         await store.recompute_referee_stats()
