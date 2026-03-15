@@ -100,7 +100,7 @@ def generate_pre_game_image(
         y += 80
         if referee_last:
             y += len(referee_last) * 20 + 25
-    if news_context:
+    if False:  # news_context disabled for now
         y += 70
     if prediction:
         y += 120
@@ -321,8 +321,8 @@ def generate_pre_game_image(
         d.text((20, cy), "ARBITRO: sin datos", fill=GRAY, font=BODY)
         cy += 22
 
-    # ── News context ──
-    if news_context:
+    # ── News context (disabled — scraped text is low quality) ──
+    if False and news_context:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
         cy += 8
         d.text((20, cy), "CONTEXTO", fill=WHITE, font=HEADER)
