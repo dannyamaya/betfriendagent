@@ -137,6 +137,48 @@ async def run() -> None:
             home_top_players = await store.get_top_card_players(home_id, 5)
             away_top_players = await store.get_top_card_players(away_id, 5)
 
+            # H2H data — fetch from API if not in DB, then read from DB
+            h2h_records = await store.get_h2h(home_id, away_id, 5)
+            if not h2h_records:
+                # Try to fetch from API and store (1 API call)
+                home_api_id = home_stats["team_name"] if home_stats else None
+                away_api_id = away_stats["team_name"] if away_stats else None
+                # Get api_ids for H2H call
+                async with store.pool.acquire() as conn:
+                    home_row = await conn.fetchrow("SELECT api_id FROM teams WHERE id=$1", home_id)
+                    away_row = await conn.fetchrow("SELECT api_id FROM teams WHERE id=$1", away_id)
+                if home_row and away_row:
+                    from betfriend.api.client import parse_fixture
+                    raw_h2h = await api.get_head2head(home_row["api_id"], away_row["api_id"], 5)
+                    for raw in raw_h2h:
+                        parsed = parse_fixture(raw)
+                        if parsed["status"] != "finished":
+                            continue
+                        h_team_id = await store.get_team_id(parsed["home_team_api_id"])
+                        a_team_id = await store.get_team_id(parsed["away_team_api_id"])
+                        if h_team_id and a_team_id:
+                            # Get card data from fixture if in our DB
+                            fid = await store.get_fixture_id_by_api_id(parsed["api_id"])
+                            h_yc = h_rc = a_yc = a_rc = 0
+                            if fid:
+                                async with store.pool.acquire() as conn:
+                                    frow = await conn.fetchrow(
+                                        "SELECT home_yc, away_yc, home_rc, away_rc FROM fixtures WHERE id=$1", fid
+                                    )
+                                if frow:
+                                    h_yc, a_yc = frow["home_yc"], frow["away_yc"]
+                                    h_rc, a_rc = frow["home_rc"], frow["away_rc"]
+                            await store.upsert_h2h(
+                                team_a_id=h_team_id, team_b_id=a_team_id,
+                                fixture_api_id=parsed["api_id"],
+                                match_date=parsed["kickoff"].date() if hasattr(parsed["kickoff"], "date") else parsed["kickoff"],
+                                team_a_yc=h_yc, team_a_rc=h_rc,
+                                team_b_yc=a_yc, team_b_rc=a_rc,
+                                team_a_score=parsed["home_score"],
+                                team_b_score=parsed["away_score"],
+                            )
+                    h2h_records = await store.get_h2h(home_id, away_id, 5)
+
             # Referee data
             referee_stats = None
             referee_yc_rank = None
@@ -166,6 +208,7 @@ async def run() -> None:
                 referee_last_games=referee_last_games,
                 home_lineup=home_lineup,
                 away_lineup=away_lineup,
+                h2h_records=h2h_records,
             )
             await telegram.send(msg)
 

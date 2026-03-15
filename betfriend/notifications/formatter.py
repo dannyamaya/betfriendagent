@@ -75,6 +75,7 @@ def format_pre_game(
     referee_last_games: list[asyncpg.Record] | None = None,
     home_lineup: list | None = None,
     away_lineup: list | None = None,
+    h2h_records: list | None = None,
 ) -> str:
     """Format a pre-game analysis message with card stats."""
     tz = ZoneInfo(settings.timezone)
@@ -142,6 +143,23 @@ def format_pre_game(
                     f"    {p['name']}: {p['total_yc']} YC / {p['total_rc']} RC "
                     f"({p['games_played']}J, avg {p['yc_per_game']:.2f}/J)"
                 )
+
+    # --- Head to Head ---
+    if h2h_records:
+        lines.append("")
+        lines.append(f"<b>Ultimos {len(h2h_records)} enfrentamientos</b>")
+        total_h2h_yc = 0
+        for h in h2h_records:
+            total_cards = h["team_a_yc"] + h["team_b_yc"]
+            total_h2h_yc += total_cards
+            score = f"{h['team_a_score']}-{h['team_b_score']}" if h["team_a_score"] is not None else "?"
+            lines.append(
+                f"  {h['team_a_name']} {score} {h['team_b_name']}: "
+                f"{total_cards} YC ({h['team_a_yc']}+{h['team_b_yc']})"
+            )
+        if len(h2h_records) > 1:
+            avg_h2h = total_h2h_yc / len(h2h_records)
+            lines.append(f"  avg {avg_h2h:.1f} YC por partido")
 
     # --- Lineup with card risk ---
     if home_lineup or away_lineup:

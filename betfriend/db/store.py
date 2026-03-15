@@ -151,6 +151,21 @@ class Store:
                     UNIQUE(team_id, fixture_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS head2head (
+                    id              SERIAL PRIMARY KEY,
+                    team_a_id       INT REFERENCES teams(id),
+                    team_b_id       INT REFERENCES teams(id),
+                    fixture_api_id  INT,
+                    match_date      DATE,
+                    team_a_yc       INT DEFAULT 0,
+                    team_a_rc       INT DEFAULT 0,
+                    team_b_yc       INT DEFAULT 0,
+                    team_b_rc       INT DEFAULT 0,
+                    team_a_score    INT,
+                    team_b_score    INT,
+                    UNIQUE(team_a_id, team_b_id, fixture_api_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS fixture_lineups (
                     id              SERIAL PRIMARY KEY,
                     fixture_id      INT REFERENCES fixtures(id),
@@ -517,6 +532,41 @@ class Store:
                 "SELECT id FROM fixtures WHERE api_id = $1", api_id
             )
             return row["id"] if row else None
+
+    # ------------------------------------------------------------------
+    # Head to Head
+    # ------------------------------------------------------------------
+
+    async def upsert_h2h(
+        self, team_a_id: int, team_b_id: int, fixture_api_id: int,
+        match_date: date, team_a_yc: int, team_a_rc: int,
+        team_b_yc: int, team_b_rc: int,
+        team_a_score: int | None, team_b_score: int | None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO head2head (team_a_id, team_b_id, fixture_api_id, match_date,
+                    team_a_yc, team_a_rc, team_b_yc, team_b_rc, team_a_score, team_b_score)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (team_a_id, team_b_id, fixture_api_id) DO UPDATE
+                    SET team_a_yc = EXCLUDED.team_a_yc, team_a_rc = EXCLUDED.team_a_rc,
+                        team_b_yc = EXCLUDED.team_b_yc, team_b_rc = EXCLUDED.team_b_rc,
+                        team_a_score = EXCLUDED.team_a_score, team_b_score = EXCLUDED.team_b_score
+            """, team_a_id, team_b_id, fixture_api_id, match_date,
+                team_a_yc, team_a_rc, team_b_yc, team_b_rc, team_a_score, team_b_score)
+
+    async def get_h2h(self, team_a_id: int, team_b_id: int, limit: int = 5) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT h.*, ta.name AS team_a_name, tb.name AS team_b_name
+                FROM head2head h
+                JOIN teams ta ON ta.id = h.team_a_id
+                JOIN teams tb ON tb.id = h.team_b_id
+                WHERE (h.team_a_id = $1 AND h.team_b_id = $2)
+                   OR (h.team_a_id = $2 AND h.team_b_id = $1)
+                ORDER BY h.match_date DESC
+                LIMIT $3
+            """, team_a_id, team_b_id, limit)
 
     # ------------------------------------------------------------------
     # Fixture Lineups
