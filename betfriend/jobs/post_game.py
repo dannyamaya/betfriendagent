@@ -222,7 +222,7 @@ async def run() -> None:
             logger.info(f"  {len(missing_ids)} fixtures missing referee")
             for league_id in (settings.la_liga_id, settings.la_liga2_id):
                 # 1 API call per league — gets ALL fixtures with referee names
-                all_raw = await api.get_all_fixtures(league_id)
+                all_raw = await api.get_all_fixtures(league_id, bypass_budget=True)
                 for raw in all_raw:
                     parsed = parse_fixture(raw)
                     if parsed["api_id"] not in missing_ids:

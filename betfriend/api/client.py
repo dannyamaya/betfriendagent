@@ -33,7 +33,7 @@ class APIFootballClient:
     async def _request(
         self, endpoint: str, params: dict[str, Any], priority: str = "normal"
     ) -> dict[str, Any] | None:
-        if not await self._budget.can_request(priority):
+        if priority != "bypass" and not await self._budget.can_request(priority):
             return None
 
         resp = await self._http.get(endpoint, params=params)
@@ -120,12 +120,13 @@ class APIFootballClient:
     # ------------------------------------------------------------------
 
     async def get_all_fixtures(
-        self, league_id: int
+        self, league_id: int, bypass_budget: bool = False
     ) -> list[dict[str, Any]]:
         """Get ALL fixtures for the season (one request)."""
         data = await self._request(
             "/fixtures",
             {"league": league_id, "season": settings.season},
+            priority="bypass" if bypass_budget else "normal",
         )
         if not data:
             return []
