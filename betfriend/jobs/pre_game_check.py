@@ -179,7 +179,6 @@ async def run() -> None:
                         h_team_id = await store.get_team_id(parsed["home_team_api_id"])
                         a_team_id = await store.get_team_id(parsed["away_team_api_id"])
                         if h_team_id and a_team_id:
-                            # Get card data from fixture if in our DB
                             fid = await store.get_fixture_id_by_api_id(parsed["api_id"])
                             h_yc = h_rc = a_yc = a_rc = 0
                             if fid:
@@ -190,6 +189,22 @@ async def run() -> None:
                                 if frow:
                                     h_yc, a_yc = frow["home_yc"], frow["away_yc"]
                                     h_rc, a_rc = frow["home_rc"], frow["away_rc"]
+                            if h_yc == 0 and a_yc == 0:
+                                events = await api.get_fixture_events(parsed["api_id"])
+                                for ev in events:
+                                    if ev.get("type") == "Card":
+                                        tid = ev.get("team", {}).get("id")
+                                        detail = ev.get("detail", "")
+                                        if "Yellow" in detail:
+                                            if tid == parsed["home_team_api_id"]:
+                                                h_yc += 1
+                                            else:
+                                                a_yc += 1
+                                        elif "Red" in detail:
+                                            if tid == parsed["home_team_api_id"]:
+                                                h_rc += 1
+                                            else:
+                                                a_rc += 1
                             await store.upsert_h2h(
                                 team_a_id=h_team_id, team_b_id=a_team_id,
                                 fixture_api_id=parsed["api_id"],

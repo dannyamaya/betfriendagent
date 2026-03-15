@@ -68,11 +68,18 @@ async def get_match_news_context(home_team: str, away_team: str) -> str:
 
 
 async def _search_google(home_team: str, away_team: str) -> list[str]:
-    """Search Google for match analysis and return top result URLs."""
+    """Search for match analysis URLs. Tries DuckDuckGo first (no CAPTCHA), then Google."""
     query = f"{home_team} vs {away_team} analisis apuestas tarjetas"
+
+    # Try DuckDuckGo HTML (no CAPTCHA issues from CI)
+    urls = await _search_ddg(query)
+    if urls:
+        logger.info(f"  News: DuckDuckGo returned {len(urls)} URLs")
+        return urls
+
+    # Fallback to Google
     search_url = "https://www.google.com/search"
     params = {"q": query, "hl": "es", "num": "5"}
-
     try:
         async with httpx.AsyncClient(
             headers=_HEADERS, follow_redirects=True, timeout=_TIMEOUT
@@ -80,28 +87,48 @@ async def _search_google(home_team: str, away_team: str) -> list[str]:
             resp = await client.get(search_url, params=params)
             resp.raise_for_status()
     except Exception as e:
-        logger.debug(f"Google search failed: {e}")
+        logger.warning(f"Google search failed: {e}")
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    urls: list[str] = []
-
-    # Extract result links from Google search page
+    urls = []
     for a_tag in soup.select("a[href]"):
         href = a_tag.get("href", "")
         if not isinstance(href, str):
             continue
-        # Google wraps results in /url?q=...
         if href.startswith("/url?q="):
             real_url = href.split("/url?q=")[1].split("&")[0]
             if real_url.startswith("http") and "google." not in real_url:
                 urls.append(real_url)
         elif href.startswith("http") and "google." not in href:
             urls.append(href)
-
         if len(urls) >= _MAX_RESULTS:
             break
+    logger.info(f"  News: Google returned {len(urls)} URLs")
+    return urls
 
+
+async def _search_ddg(query: str) -> list[str]:
+    """Search DuckDuckGo HTML for result URLs."""
+    search_url = "https://html.duckduckgo.com/html/"
+    try:
+        async with httpx.AsyncClient(
+            headers=_HEADERS, follow_redirects=True, timeout=_TIMEOUT
+        ) as client:
+            resp = await client.post(search_url, data={"q": query})
+            resp.raise_for_status()
+    except Exception as e:
+        logger.debug(f"DuckDuckGo search failed: {e}")
+        return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    urls: list[str] = []
+    for a_tag in soup.select("a.result__a"):
+        href = a_tag.get("href", "")
+        if isinstance(href, str) and href.startswith("http"):
+            urls.append(href)
+            if len(urls) >= _MAX_RESULTS:
+                break
     return urls
 
 

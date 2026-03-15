@@ -201,6 +201,23 @@ async def run() -> None:
                             if frow:
                                 h_yc, a_yc = frow["home_yc"], frow["away_yc"]
                                 h_rc, a_rc = frow["home_rc"], frow["away_rc"]
+                        # If no card data from DB, fetch events from API
+                        if h_yc == 0 and a_yc == 0:
+                            events = await api.get_fixture_events(parsed["api_id"])
+                            for ev in events:
+                                if ev.get("type") == "Card":
+                                    tid = ev.get("team", {}).get("id")
+                                    detail = ev.get("detail", "")
+                                    if "Yellow" in detail:
+                                        if tid == parsed["home_team_api_id"]:
+                                            h_yc += 1
+                                        else:
+                                            a_yc += 1
+                                    elif "Red" in detail:
+                                        if tid == parsed["home_team_api_id"]:
+                                            h_rc += 1
+                                        else:
+                                            a_rc += 1
                         await store.upsert_h2h(
                             team_a_id=h_team_id, team_b_id=a_team_id,
                             fixture_api_id=parsed["api_id"],

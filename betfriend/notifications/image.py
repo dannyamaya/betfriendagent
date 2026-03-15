@@ -232,11 +232,14 @@ def generate_pre_game_image(
         ref_rc = referee.get("total_rc", 0)
         ref_games = referee.get("games", 0)
         ref_ypg = referee.get("yc_per_game", 0)
-        d.text((30, cy), f"{ref_yc} YC / {ref_rc} RC en {ref_games}J — {ref_ypg:.1f}/J", fill=GRAY, font=BODY)
+        d.text((30, cy), f"Temporada: {ref_yc} YC / {ref_rc} RC en {ref_games}J — {ref_ypg:.1f}/J", fill=GRAY, font=BODY)
         cy += 20
 
         if referee_last:
+            d.text((30, cy), f"Ultimos {len(referee_last)} partidos:", fill=WHITE, font=SMALL)
+            cy += 16
             ref_ycs = [g.get("total_yc", 0) for g in referee_last]
+            ref_rcs = [g.get("total_rc", 0) for g in referee_last]
             ref_delta = stdev(ref_ycs) if len(ref_ycs) > 1 else 0.0
             for g in referee_last:
                 text = f"{g.get('home_team', '?')} vs {g.get('away_team', '?')}"
@@ -245,8 +248,13 @@ def generate_pre_game_image(
                 cw = d.textlength(cards, font=SMALL)
                 d.text((W - 30 - cw, cy), cards, fill=GRAY, font=SMALL)
                 cy += 18
+            avg_last = sum(ref_ycs) / len(ref_ycs)
+            avg_rc_last = sum(ref_rcs) / len(ref_rcs)
+            d.text((30, cy), f"AVG ult.{len(referee_last)}: {avg_last:.1f} YC  {avg_rc_last:.1f} RC", fill=WHITE, font=BODY_B)
             con_color = GREEN if ref_delta <= 1.5 else RED
-            d.text((30, cy), f"delta {ref_delta:.1f}", fill=con_color, font=BODY_B)
+            delta_text = f"delta {ref_delta:.1f}"
+            dw = d.textlength(delta_text, font=BODY_B)
+            d.text((W - 30 - dw, cy), delta_text, fill=con_color, font=BODY_B)
             cy += 22
     elif not referee:
         d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
