@@ -18,6 +18,7 @@ from betfriend.db.store import Store
 from betfriend.notifications.formatter import format_pre_game
 from betfriend.notifications.image import generate_pre_game_image
 from betfriend.notifications.telegram import TelegramNotifier
+from betfriend.analysis.cards import predict_cards
 from betfriend.scrapers.coaches import get_coach_aggressiveness
 from betfriend.scrapers.news import get_match_news_context
 
@@ -228,6 +229,33 @@ async def run() -> None:
                 fixture["home_team_name"], fixture["away_team_name"]
             )
 
+            # Run prediction algorithm
+            prediction = predict_cards(
+                home_stats=dict(home_stats) if home_stats else None,
+                away_stats=dict(away_stats) if away_stats else None,
+                home_form=[dict(r) for r in home_form] if home_form else None,
+                away_form=[dict(r) for r in away_form] if away_form else None,
+                referee=dict(referee_stats) if referee_stats else None,
+                referee_last=[dict(r) for r in referee_last_games] if referee_last_games else None,
+                h2h=[dict(r) for r in h2h_records] if h2h_records else None,
+                home_coach_score=home_coach_data[1] if home_coach_data else None,
+                away_coach_score=away_coach_data[1] if away_coach_data else None,
+                home_lineup=[dict(r) for r in home_lineup] if home_lineup else None,
+                away_lineup=[dict(r) for r in away_lineup] if away_lineup else None,
+                news_context=news_context,
+            )
+
+            # Save prediction to DB
+            await store.save_prediction(
+                fixture_id=fixture_db_id,
+                predicted_yc=prediction.predicted_total_yc,
+                predicted_home_yc=prediction.predicted_home_yc,
+                predicted_away_yc=prediction.predicted_away_yc,
+                predicted_rc=prediction.predicted_total_rc,
+                rc_probability=prediction.rc_probability,
+                confidence=prediction.confidence,
+            )
+
             # Convert DB records to dicts for image generator
             def _to_dict(rec):
                 return dict(rec) if rec else None
@@ -267,6 +295,13 @@ async def run() -> None:
                 home_coach=home_coach_data,
                 away_coach=away_coach_data,
                 news_context=news_context or None,
+                prediction={
+                    "predicted_total_yc": prediction.predicted_total_yc,
+                    "predicted_home_yc": prediction.predicted_home_yc,
+                    "predicted_away_yc": prediction.predicted_away_yc,
+                    "rc_probability": prediction.rc_probability,
+                    "confidence": prediction.confidence,
+                },
             )
             await telegram.send_photo(img_buf)
 

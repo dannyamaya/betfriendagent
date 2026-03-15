@@ -13,6 +13,7 @@ from betfriend.config.settings import settings
 from betfriend.db.store import Store
 from betfriend.notifications.image import generate_pre_game_image
 from betfriend.notifications.telegram import TelegramNotifier
+from betfriend.analysis.cards import predict_cards
 from betfriend.scrapers.coaches import get_coach_aggressiveness
 from betfriend.scrapers.news import get_match_news_context
 
@@ -30,9 +31,11 @@ async def run() -> None:
         tomorrow = datetime.now(ZoneInfo("America/Bogota")).date() + timedelta(days=1)
         logger.info(f"Looking for fixtures on {tomorrow}")
 
-        # First make sure we have tomorrow's fixtures
-        for league_id in (settings.la_liga_id, settings.la_liga2_id):
-            raw_fixtures = await api.get_fixtures_by_date(league_id, tomorrow)
+        # Make sure we have today's and tomorrow's fixtures
+        today_bogota = datetime.now(ZoneInfo("America/Bogota")).date()
+        for target_date in (today_bogota, tomorrow):
+          for league_id in (settings.la_liga_id, settings.la_liga2_id):
+            raw_fixtures = await api.get_fixtures_by_date(league_id, target_date)
             comp_id = await store.get_competition_id(league_id)
             for raw in raw_fixtures:
                 parsed = parse_fixture(raw)
@@ -81,11 +84,11 @@ async def run() -> None:
 
         await store.recompute_referee_stats()
 
-        # Find Barcelona fixture, or first La Liga, or first available
-        db_fixtures = await store.get_fixtures_by_date(tomorrow)
+        # Find Barcelona fixture — try today first, then tomorrow
+        today = datetime.now(ZoneInfo("America/Bogota")).date()
+        db_fixtures = await store.get_fixtures_by_date(today)
         if not db_fixtures:
-            # Try today
-            db_fixtures = await store.get_fixtures_by_date(datetime.now(ZoneInfo("America/Bogota")).date())
+            db_fixtures = await store.get_fixtures_by_date(tomorrow)
         if not db_fixtures:
             logger.error("No fixtures found")
             return
@@ -225,6 +228,23 @@ async def run() -> None:
             fixture["home_team_name"], fixture["away_team_name"]
         )
 
+        # Run prediction
+        prediction = predict_cards(
+            home_stats=_to_dict(home_stats),
+            away_stats=_to_dict(away_stats),
+            home_form=_to_dicts(home_form),
+            away_form=_to_dicts(away_form),
+            referee=_to_dict(referee_stats),
+            referee_last=_to_dicts(referee_last_games),
+            h2h=_to_dicts(h2h_records),
+            home_coach_score=home_coach_data[1] if home_coach_data else None,
+            away_coach_score=away_coach_data[1] if away_coach_data else None,
+            home_lineup=_to_dicts(home_lineup) if home_lineup else None,
+            away_lineup=_to_dicts(away_lineup) if away_lineup else None,
+            news_context=news_context,
+        )
+        logger.info(f"Prediction: {prediction.summary}")
+
         img_buf = generate_pre_game_image(
             home=fixture["home_team_name"],
             away=fixture["away_team_name"],
@@ -254,6 +274,13 @@ async def run() -> None:
             home_coach=home_coach_data,
             away_coach=away_coach_data,
             news_context=news_context or None,
+            prediction={
+                "predicted_total_yc": prediction.predicted_total_yc,
+                "predicted_home_yc": prediction.predicted_home_yc,
+                "predicted_away_yc": prediction.predicted_away_yc,
+                "rc_probability": prediction.rc_probability,
+                "confidence": prediction.confidence,
+            },
         )
 
         await telegram.send_photo(img_buf)

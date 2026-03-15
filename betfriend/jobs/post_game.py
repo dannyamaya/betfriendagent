@@ -147,6 +147,15 @@ async def run() -> None:
                 fixtures_updated += 1
                 logger.info(f"  Updated: {parsed['home_team_name']} {parsed['home_score']}-{parsed['away_score']} {parsed['away_team_name']} (YC: {home_yc+away_yc}, RC: {home_rc+away_rc})")
 
+                # Update prediction actuals
+                await store.update_prediction_actuals(
+                    fixture_id=fixture_db_id,
+                    actual_yc=home_yc + away_yc,
+                    actual_home_yc=home_yc,
+                    actual_away_yc=away_yc,
+                    actual_rc=home_rc + away_rc,
+                )
+
         # Recompute player card stats for all players with new data
         if fixtures_updated > 0:
             logger.info("Recomputing player card stats...")
@@ -245,6 +254,18 @@ async def run() -> None:
                 await store.recompute_referee_stats()
                 logger.info(f"Assigned {refs_assigned} referees")
 
+        # Accuracy stats
+        accuracy = await store.get_accuracy_stats()
+        accuracy_str = ""
+        if accuracy and accuracy["total"] > 0:
+            accuracy_str = (
+                f"\n\n📊 <b>Precision acumulada</b>\n"
+                f"Predicciones: {accuracy['total']}\n"
+                f"Error promedio YC: {accuracy['avg_yc_error']:.1f}\n"
+                f"Error promedio local: {accuracy['avg_home_error']:.1f}\n"
+                f"Error promedio visitante: {accuracy['avg_away_error']:.1f}"
+            )
+
         remaining = await budget.requests_remaining()
         summary = (
             f"<b>BetFriend - Post-Game Update</b>\n\n"
@@ -253,6 +274,7 @@ async def run() -> None:
             f"Player records added: {player_records}\n"
             f"Referees assigned: {refs_assigned}\n"
             f"API requests remaining: {remaining}"
+            f"{accuracy_str}"
         )
         await telegram.send(summary)
         logger.info(f"Post-game done: {fixtures_updated} fixtures, {player_records} player records")

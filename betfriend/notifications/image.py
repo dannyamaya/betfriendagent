@@ -74,6 +74,7 @@ def generate_pre_game_image(
     home_coach: tuple[str, int, str] | None = None,
     away_coach: tuple[str, int, str] | None = None,
     news_context: str | None = None,
+    prediction: dict | None = None,
 ) -> BytesIO:
     """Generate a pre-game card image and return as BytesIO PNG."""
     W = 700
@@ -101,6 +102,8 @@ def generate_pre_game_image(
             y += len(referee_last) * 20 + 25
     if news_context:
         y += 70
+    if prediction:
+        y += 120
     y += 40  # footer padding
 
     img = Image.new("RGB", (W, y), BG)
@@ -271,6 +274,45 @@ def generate_pre_game_image(
         if line:
             d.text((30, cy), line, fill=GRAY, font=SMALL)
             cy += 16
+
+    # ── BetFriend Pronostic ──
+    if prediction:
+        d.line([(20, cy), (W - 20, cy)], fill=DIVIDER, width=1)
+        cy += 8
+        d.text((20, cy), "BETFRIEND PRONOSTIC", fill=ACCENT, font=HEADER)
+        cy += 25
+
+        pred_total = prediction.get("predicted_total_yc", 0)
+        pred_home = prediction.get("predicted_home_yc", 0)
+        pred_away = prediction.get("predicted_away_yc", 0)
+        rc_prob = prediction.get("rc_probability", "baja")
+        confidence = prediction.get("confidence", "baja")
+
+        # Total cards bar
+        bar_x = 30
+        bar_w = int(min(pred_total, 10) * 40)
+        bar_color = GREEN if pred_total < 4 else ORANGE if pred_total < 6 else RED
+        d.rectangle([bar_x, cy, bar_x + bar_w, cy + 18], fill=bar_color)
+        d.text((bar_x + bar_w + 8, cy + 2), f"{pred_total} YC total", fill=WHITE, font=BODY_B)
+        cy += 25
+
+        # Per-team breakdown
+        d.text((30, cy), f"{home}: >{pred_home} YC", fill=YELLOW, font=BODY)
+        away_text = f"{away}: >{pred_away} YC"
+        aw = d.textlength(away_text, font=BODY)
+        d.text((W - 30 - aw, cy), away_text, fill=YELLOW, font=BODY)
+        cy += 22
+
+        # Red card probability
+        rc_colors = {"muy alta": RED, "alta": ORANGE, "media": YELLOW, "baja": GREEN}
+        rc_color = rc_colors.get(rc_prob, GRAY)
+        d.text((30, cy), f"Roja: {rc_prob}", fill=rc_color, font=BODY_B)
+
+        # Confidence
+        conf_text = f"Confianza: {confidence}"
+        cw = d.textlength(conf_text, font=SMALL)
+        d.text((W - 30 - cw, cy), conf_text, fill=GRAY, font=SMALL)
+        cy += 22
 
     # Crop to actual height
     img = img.crop((0, 0, W, cy + 15))

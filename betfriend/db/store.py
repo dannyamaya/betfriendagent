@@ -177,6 +177,22 @@ class Store:
                     UNIQUE(fixture_id, player_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS predictions (
+                    id              SERIAL PRIMARY KEY,
+                    fixture_id      INT REFERENCES fixtures(id) UNIQUE,
+                    predicted_yc    REAL,
+                    predicted_home_yc REAL,
+                    predicted_away_yc REAL,
+                    predicted_rc    REAL,
+                    rc_probability  TEXT,
+                    confidence      TEXT,
+                    actual_yc       INT,
+                    actual_home_yc  INT,
+                    actual_away_yc  INT,
+                    actual_rc       INT,
+                    created_at      TIMESTAMPTZ DEFAULT NOW()
+                );
+
                 CREATE TABLE IF NOT EXISTS api_request_log (
                     id              SERIAL PRIMARY KEY,
                     endpoint        TEXT NOT NULL,
@@ -690,6 +706,52 @@ class Store:
                 WHERE sub.player_id = $1
             """, player_id)
             return row["rank"] if row else None
+
+    # ------------------------------------------------------------------
+    # Predictions
+    # ------------------------------------------------------------------
+
+    async def save_prediction(
+        self, fixture_id: int, predicted_yc: float, predicted_home_yc: float,
+        predicted_away_yc: float, predicted_rc: float,
+        rc_probability: str, confidence: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO predictions (fixture_id, predicted_yc, predicted_home_yc,
+                    predicted_away_yc, predicted_rc, rc_probability, confidence)
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                ON CONFLICT (fixture_id) DO UPDATE
+                    SET predicted_yc = EXCLUDED.predicted_yc,
+                        predicted_home_yc = EXCLUDED.predicted_home_yc,
+                        predicted_away_yc = EXCLUDED.predicted_away_yc,
+                        predicted_rc = EXCLUDED.predicted_rc,
+                        rc_probability = EXCLUDED.rc_probability,
+                        confidence = EXCLUDED.confidence
+            """, fixture_id, predicted_yc, predicted_home_yc,
+                predicted_away_yc, predicted_rc, rc_probability, confidence)
+
+    async def update_prediction_actuals(
+        self, fixture_id: int, actual_yc: int, actual_home_yc: int,
+        actual_away_yc: int, actual_rc: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE predictions SET actual_yc=$1, actual_home_yc=$2,
+                    actual_away_yc=$3, actual_rc=$4
+                WHERE fixture_id=$5
+            """, actual_yc, actual_home_yc, actual_away_yc, actual_rc, fixture_id)
+
+    async def get_accuracy_stats(self) -> asyncpg.Record | None:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("""
+                SELECT COUNT(*) AS total,
+                       AVG(ABS(predicted_yc - actual_yc)) AS avg_yc_error,
+                       AVG(ABS(predicted_home_yc - actual_home_yc)) AS avg_home_error,
+                       AVG(ABS(predicted_away_yc - actual_away_yc)) AS avg_away_error
+                FROM predictions
+                WHERE actual_yc IS NOT NULL
+            """)
 
     # ------------------------------------------------------------------
     # API Request Log
