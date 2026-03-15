@@ -320,30 +320,6 @@ async def run() -> None:
             )
             await telegram.send_photo(img_buf)
 
-            msg = format_pre_game(
-                fixture,
-                home_stats=home_stats,
-                away_stats=away_stats,
-                home_yc_rank=home_yc_rank,
-                away_yc_rank=away_yc_rank,
-                home_rc_rank=home_rc_rank,
-                away_rc_rank=away_rc_rank,
-                home_form=home_form,
-                away_form=away_form,
-                home_top_players=home_top_players,
-                away_top_players=away_top_players,
-                referee_stats=referee_stats,
-                referee_yc_rank=referee_yc_rank,
-                referee_total_refs=referee_total_refs,
-                referee_last_games=referee_last_games,
-                home_lineup=home_lineup,
-                away_lineup=away_lineup,
-                h2h_records=h2h_records,
-                home_player_ranks=home_player_ranks,
-                away_player_ranks=away_player_ranks,
-            )
-            await telegram.send(msg)
-
             await store.mark_fixture_processed(fixture_db_id)
             logger.info(f"Fixture {fixture_db_id} processed and marked")
 
