@@ -137,35 +137,57 @@ def generate_pre_game_image(
         total_yc = 0
         total_rc = 0
         for h in h2h:
-            tyc = h.get("team_a_yc", 0) + h.get("team_b_yc", 0)
-            trc = h.get("team_a_rc", 0) + h.get("team_b_rc", 0)
-            total_yc += tyc
-            total_rc += trc
+            a_yc = h.get("team_a_yc", 0)
+            a_rc = h.get("team_a_rc", 0)
+            b_yc = h.get("team_b_yc", 0)
+            b_rc = h.get("team_b_rc", 0)
+            total_yc += a_yc + b_yc
+            total_rc += a_rc + b_rc
             score = f"{h.get('team_a_score', '?')}-{h.get('team_b_score', '?')}"
-            text = f"{h.get('team_a_name', '?')} {score} {h.get('team_b_name', '?')}"
-            d.text((30, cy), text, fill=GRAY, font=SMALL)
-            # Cards right-aligned with color squares
+            # Date
+            match_date = h.get("match_date")
+            date_str = ""
+            if match_date:
+                if hasattr(match_date, "strftime"):
+                    date_str = match_date.strftime("%d/%m/%y") + "  "
+                else:
+                    date_str = str(match_date)[:10] + "  "
+            team_a = h.get('team_a_name', '?')
+            team_b = h.get('team_b_name', '?')
+            d.text((30, cy), f"{date_str}{team_a} {score} {team_b}", fill=GRAY, font=SMALL)
+            # Cards per team right-aligned
             rx = W - 30
-            rc_text = str(trc)
-            rx -= d.textlength(rc_text, font=SMALL)
-            d.text((rx, cy), rc_text, fill=GRAY, font=SMALL)
-            rx -= 13
-            d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=RED)
-            rx -= 10
-            yc_text = str(tyc)
-            rx -= d.textlength(yc_text, font=SMALL)
-            d.text((rx, cy), yc_text, fill=GRAY, font=SMALL)
-            rx -= 13
-            d.rectangle([rx, cy + 2, rx + 10, cy + 12], fill=YELLOW)
+            # Team B cards
+            d.text((rx - d.textlength(str(b_rc), font=SMALL), cy), str(b_rc), fill=GRAY, font=SMALL)
+            rx -= d.textlength(str(b_rc), font=SMALL) + 3
+            d.rectangle([rx - 8, cy + 2, rx, cy + 12], fill=RED)
+            rx -= 12
+            d.text((rx - d.textlength(str(b_yc), font=SMALL), cy), str(b_yc), fill=GRAY, font=SMALL)
+            rx -= d.textlength(str(b_yc), font=SMALL) + 3
+            d.rectangle([rx - 8, cy + 2, rx, cy + 12], fill=YELLOW)
+            rx -= 18
+            # Separator
+            d.text((rx - 4, cy), "|", fill=DIVIDER, font=SMALL)
+            rx -= 14
+            # Team A cards
+            d.text((rx - d.textlength(str(a_rc), font=SMALL), cy), str(a_rc), fill=GRAY, font=SMALL)
+            rx -= d.textlength(str(a_rc), font=SMALL) + 3
+            d.rectangle([rx - 8, cy + 2, rx, cy + 12], fill=RED)
+            rx -= 12
+            d.text((rx - d.textlength(str(a_yc), font=SMALL), cy), str(a_yc), fill=GRAY, font=SMALL)
+            rx -= d.textlength(str(a_yc), font=SMALL) + 3
+            d.rectangle([rx - 8, cy + 2, rx, cy + 12], fill=YELLOW)
             cy += 20
         if len(h2h) > 1:
+            avg_yc = total_yc / len(h2h)
+            avg_rc = total_rc / len(h2h)
             d.text((30, cy), "AVG", fill=WHITE, font=BODY_B)
             ax = 70
             d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=YELLOW)
-            d.text((ax + 14, cy), f"{total_yc/len(h2h):.1f}", fill=WHITE, font=BODY_B)
+            d.text((ax + 14, cy), f"{avg_yc:.1f}", fill=WHITE, font=BODY_B)
             ax += 50
             d.rectangle([ax, cy + 2, ax + 10, cy + 14], fill=RED)
-            d.text((ax + 14, cy), f"{total_rc/len(h2h):.1f}", fill=WHITE, font=BODY_B)
+            d.text((ax + 14, cy), f"{avg_rc:.1f}", fill=WHITE, font=BODY_B)
             cy += 22
 
     # ── Lineup ──

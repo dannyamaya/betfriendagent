@@ -73,7 +73,7 @@ async def get_match_news_context(
 
 async def _search_google(home_team: str, away_team: str) -> list[str]:
     """Search for match analysis URLs. Tries DuckDuckGo first (no CAPTCHA), then Google."""
-    query = f"{home_team} vs {away_team} analisis apuestas tarjetas"
+    query = f"{home_team} vs {away_team} previa analisis tarjetas amarillas"
 
     # Try DuckDuckGo HTML (no CAPTCHA issues from CI)
     urls = await _search_ddg(query)
@@ -138,9 +138,15 @@ async def _search_ddg(query: str) -> list[str]:
 
 async def _fetch_page_text(url: str) -> str:
     """Fetch a URL and extract visible text content."""
+    headers = {
+        **_HEADERS,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.google.com/",
+        "DNT": "1",
+    }
     try:
         async with httpx.AsyncClient(
-            headers=_HEADERS, follow_redirects=True, timeout=_TIMEOUT
+            headers=headers, follow_redirects=True, timeout=_TIMEOUT
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
