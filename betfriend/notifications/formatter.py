@@ -73,6 +73,8 @@ def format_pre_game(
     referee_yc_rank: int | None = None,
     referee_total_refs: int | None = None,
     referee_last_games: list[asyncpg.Record] | None = None,
+    home_lineup: list | None = None,
+    away_lineup: list | None = None,
 ) -> str:
     """Format a pre-game analysis message with card stats."""
     tz = ZoneInfo(settings.timezone)
@@ -140,6 +142,40 @@ def format_pre_game(
                     f"    {p['name']}: {p['total_yc']} YC / {p['total_rc']} RC "
                     f"({p['games_played']}J, avg {p['yc_per_game']:.2f}/J)"
                 )
+
+    # --- Lineup with card risk ---
+    if home_lineup or away_lineup:
+        lines.append("")
+        lines.append("<b>Alineacion - Riesgo de tarjetas</b>")
+
+        for name, lineup in [(home, home_lineup), (away, away_lineup)]:
+            if not lineup:
+                continue
+            starters = [p for p in lineup if p["is_starter"]]
+            subs = [p for p in lineup if not p["is_starter"]]
+
+            lines.append(f"  <b>{name} (titulares)</b>")
+            for p in starters:
+                risk = ""
+                if p["games_played"] >= 3:
+                    if p["yc_per_game"] >= 0.5:
+                        risk = " ⚠️ALTA"
+                    elif p["yc_per_game"] >= 0.3:
+                        risk = " ⚡media"
+                lines.append(
+                    f"    {p['player_name']} ({p['position'] or '?'}): "
+                    f"{p['total_yc']}YC/{p['total_rc']}RC "
+                    f"({p['games_played']}J, {p['yc_per_game']:.2f}/J){risk}"
+                )
+
+            # Show top subs with cards
+            risky_subs = [s for s in subs if s["total_yc"] > 0][:3]
+            if risky_subs:
+                lines.append(f"  <i>Suplentes destacados:</i>")
+                for p in risky_subs:
+                    lines.append(
+                        f"    {p['player_name']}: {p['total_yc']}YC/{p['total_rc']}RC"
+                    )
 
     # --- Referee section ---
     if referee_stats and referee_stats["games"] > 0:

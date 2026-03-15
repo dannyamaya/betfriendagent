@@ -151,6 +151,17 @@ class Store:
                     UNIQUE(team_id, fixture_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS fixture_lineups (
+                    id              SERIAL PRIMARY KEY,
+                    fixture_id      INT REFERENCES fixtures(id),
+                    player_id       INT REFERENCES players(id),
+                    team_id         INT REFERENCES teams(id),
+                    is_starter      BOOLEAN DEFAULT TRUE,
+                    position        TEXT,
+                    grid_pos        TEXT,
+                    UNIQUE(fixture_id, player_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS api_request_log (
                     id              SERIAL PRIMARY KEY,
                     endpoint        TEXT NOT NULL,
@@ -506,6 +517,50 @@ class Store:
                 "SELECT id FROM fixtures WHERE api_id = $1", api_id
             )
             return row["id"] if row else None
+
+    # ------------------------------------------------------------------
+    # Fixture Lineups
+    # ------------------------------------------------------------------
+
+    async def upsert_lineup_player(
+        self, fixture_id: int, player_id: int, team_id: int,
+        is_starter: bool, position: str | None, grid_pos: str | None
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO fixture_lineups (fixture_id, player_id, team_id, is_starter, position, grid_pos)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (fixture_id, player_id) DO UPDATE
+                    SET is_starter = EXCLUDED.is_starter,
+                        position = EXCLUDED.position,
+                        grid_pos = EXCLUDED.grid_pos
+            """, fixture_id, player_id, team_id, is_starter, position, grid_pos)
+
+    async def get_fixture_lineup(self, fixture_id: int, team_id: int) -> list[asyncpg.Record]:
+        """Get lineup for a team in a fixture, with card stats."""
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT fl.is_starter, fl.position, fl.grid_pos,
+                       p.name AS player_name, p.id AS player_id,
+                       COALESCE(pcs.total_yc, 0) AS total_yc,
+                       COALESCE(pcs.total_rc, 0) AS total_rc,
+                       COALESCE(pcs.games_played, 0) AS games_played,
+                       COALESCE(pcs.yc_per_game, 0) AS yc_per_game,
+                       COALESCE(pcs.rc_per_game, 0) AS rc_per_game
+                FROM fixture_lineups fl
+                JOIN players p ON p.id = fl.player_id
+                LEFT JOIN player_card_stats pcs ON pcs.player_id = p.id
+                WHERE fl.fixture_id = $1 AND fl.team_id = $2
+                ORDER BY fl.is_starter DESC, pcs.total_yc DESC NULLS LAST
+            """, fixture_id, team_id)
+
+    async def has_lineup(self, fixture_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM fixture_lineups WHERE fixture_id = $1",
+                fixture_id
+            )
+            return row["cnt"] > 0  # type: ignore[index]
 
     # ------------------------------------------------------------------
     # Pre-game analysis queries
