@@ -61,6 +61,7 @@ async def run() -> None:
 
                 # Assign referee from API
                 ref_name = parsed.get("referee")
+                logger.info(f"  Fixture {parsed['home_team_name']} vs {parsed['away_team_name']}: referee='{ref_name}'")
                 referee_id = None
                 if ref_name:
                     ref_name = ref_name.strip()
@@ -114,7 +115,7 @@ async def run() -> None:
         away_id = fixture["away_team_id"]
         fixture_db_id = fixture["id"]
 
-        logger.info(f"Testing: {fixture['home_team_name']} vs {fixture['away_team_name']}")
+        logger.info(f"Testing: {fixture['home_team_name']} vs {fixture['away_team_name']} (referee_id={fixture['referee_id']})")
 
         # Try to fetch lineup (might not be available yet)
         from betfriend.jobs.pre_game_check import _fetch_and_store_lineup
